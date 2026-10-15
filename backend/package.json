@@ -1,0 +1,31 @@
+{
+  "name": "dms-backend",
+  "version": "0.1.0",
+  "description": "Backend for the Vision Based Driver Monitoring and Safety Assistance System",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check:schemas": "node scripts/check-schemas.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.0.2",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "mqtt": "^5.10.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3"
+  }
+}

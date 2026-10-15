@@ -1,0 +1,9 @@
+# On the Pi, numpy / opencv / picamera2 / paho / serial / gpiozero come from apt
+# (see deploy/pi-setup.sh) and the venv is created with --system-site-packages.
+mediapipe>=1.1
+onnxruntime>=1.20
+paho-mqtt>=2.0
+pyserial>=3.5
+numpy>=1.26
+opencv-python-headless>=4.9; platform_machine != "aarch64"
+pytest>=8

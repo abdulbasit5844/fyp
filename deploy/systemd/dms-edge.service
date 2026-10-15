@@ -1,0 +1,15 @@
+[Unit]
+Description=DMS edge AI pipeline (camera, drowsiness, emotion, alerts)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/dms/edge
+Environment=PYTHONUNBUFFERED=1
+Environment=DMS_DEVICE_ID=pi-vision-01
+Environment=DMS_CLIPS_DIR=/var/lib/dms/clips
+ExecStart=%h/dms/edge/.venv/bin/python -m dms_edge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

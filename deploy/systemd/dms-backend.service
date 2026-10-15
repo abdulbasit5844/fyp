@@ -1,0 +1,12 @@
+[Unit]
+Description=DMS backend (Express API, WebSocket, MQTT bridge)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/dms/backend
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
