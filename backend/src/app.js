@@ -21,6 +21,7 @@ function createApp() {
   app.use('/api/drivers', requireAuth, require('./routes/drivers.routes'));
   app.use('/api/users', requireAuth, require('./routes/users.routes'));
   app.use('/api/whatsapp', requireAuth, require('./routes/whatsapp.routes'));
+  app.use('/api/stream', require('./routes/stream.routes'));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(errorHandler);

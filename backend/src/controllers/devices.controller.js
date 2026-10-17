@@ -3,6 +3,8 @@ const ApiError = require('../utils/ApiError');
 const pick = require('../utils/pick');
 const bridge = require('../realtime/mqttBridge');
 const ws = require('../realtime/wsHub');
+const config = require('../config');
+const tickets = require('../services/streamTickets');
 
 async function list(req, res) {
   const devices = await Device.find({ owner: req.ownerId })
@@ -74,4 +76,37 @@ async function unpair(req, res) {
   res.status(204).end();
 }
 
-module.exports = { list, discover, pair, get, update, unpair, setDetection };
+// What the OV5647 camera can do at each size (see edge/dms_edge/camera.py).
+const LIVE_QUALITIES = {
+  '480p': { resolution: '640x480', fps: 60 },
+  '720p': { resolution: '1280x720', fps: 46 },
+  '1080p': { resolution: '1920x1080', fps: 30 },
+};
+
+// Live view: asks the unit to stream (H.264 over RTSP through MediaMTX on the
+// Pi) at the chosen quality. The returned URL carries a short-lived ticket as
+// the RTSP password; MediaMTX checks it with /api/stream/auth. The app repeats
+// this call as a keep-alive while watching.
+async function setLive(req, res) {
+  if (typeof req.body?.enabled !== 'boolean') throw ApiError.badRequest('enabled must be true or false');
+  const quality = req.body.quality ?? '480p';
+  if (!LIVE_QUALITIES[quality]) throw ApiError.badRequest(`quality must be one of ${Object.keys(LIVE_QUALITIES).join(', ')}`);
+  const device = await Device.findOne({ _id: req.params.id, owner: req.ownerId });
+  if (!device) throw ApiError.notFound('Device not found');
+  if (req.body.enabled && !device.online) throw ApiError.conflict('The vehicle unit is offline');
+  bridge.requestLive(device, req.body.enabled, quality);
+  if (!req.body.enabled) {
+    tickets.revoke(req.ownerId, device.deviceId);
+    return res.json({ enabled: false });
+  }
+  const ticket = tickets.issue(req.ownerId, device.deviceId);
+  res.json({
+    enabled: true,
+    url: `rtsp://live:${ticket}@${req.hostname}:${config.rtspPort}/${encodeURIComponent(device.deviceId)}`,
+    quality,
+    ...LIVE_QUALITIES[quality],
+    qualities: Object.entries(LIVE_QUALITIES).map(([name, q]) => ({ name, ...q })),
+  });
+}
+
+module.exports = { list, discover, pair, get, update, unpair, setDetection, setLive };

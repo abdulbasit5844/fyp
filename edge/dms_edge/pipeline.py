@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 VERIFY_TIMEOUT = 10.0  # seconds of unrecognised face before an unverified_driver event
 REVERIFY_AFTER = 30.0  # face absent this long → possible driver change
+LIVE_KEEPALIVE = 45.0  # seconds without a request from the app before the stream stops
 ENROLL_SAMPLES = 5
 ENROLL_SPACING = 0.15  # seconds between enrollment samples
 # Identity frames must be at least this good (enrollment and verification).
@@ -105,7 +106,10 @@ class Pipeline:
             "cmd/ack": self._app_ack,
             "cmd/enroll": self._on_enroll,
             "cmd/detection": self._on_detection,
+            "cmd/live": self._on_live,
         })
+        # Live view: streaming runs while the app keeps asking for it.
+        self.live_until = 0.0
         # Start/Stop from the app (retained on MQTT). Stopped: no detection or alerts.
         self.detecting = False
 
@@ -165,6 +169,24 @@ class Pipeline:
             self._reset_driver_model()
         log.info("detection %s from the app", "started" if enabled else "stopped")
         self._publish_status(time.monotonic(), force=True)
+
+    def _on_live(self, payload: dict):
+        """{enabled, quality}: the app opened/closed the live view. It repeats the request
+        while watching; without it the stream stops after LIVE_KEEPALIVE."""
+        if payload.get("enabled"):
+            quality = payload.get("quality", "480p")
+            if not self.camera.live or self.camera.live_quality != quality:
+                log.info("live view requested (%s)", quality)
+            self.live_until = time.monotonic() + LIVE_KEEPALIVE
+            self.camera.set_live(f"rtsp://127.0.0.1:{self.s.rtsp_port}/{self.s.device_id}", quality)
+        else:
+            self._stop_live("closed in the app")
+
+    def _stop_live(self, why: str):
+        if self.live_until:
+            log.info("live view stopped (%s)", why)
+        self.live_until = 0.0
+        self.camera.set_live(None)
 
     def _on_enroll(self, payload: dict):
         """preview: stream the camera view to the app; capture: take the photo and
@@ -395,6 +417,8 @@ class Pipeline:
             "online": True,
             "state": self.state,
             "detecting": self.detecting,
+            "live": self.camera.live,
+            "liveQuality": self.camera.live_quality,
             "monitoring": self.detecting and self.verified,
             "driverId": self.driver["id"] if self.driver else None,
             "location": self.gps.position,
@@ -429,6 +453,8 @@ class Pipeline:
         try:
             while True:
                 self.alerts.tick()
+                if self.live_until and time.monotonic() > self.live_until:
+                    self._stop_live("no viewer")
                 frame, frame_id = self.camera.read(frame_id, timeout=1.0)
                 now = time.monotonic()
                 if frame is None:

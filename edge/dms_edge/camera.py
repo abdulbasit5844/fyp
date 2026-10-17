@@ -15,7 +15,22 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+# Live view qualities: stream size, frame rate (the OV5647's limit for that size)
+# and H.264 bitrate. The AI always reads a ~640-wide copy (the "lores" stream),
+# so a bigger stream does not slow detection down.
+LIVE_QUALITIES = {
+    # "sensor" pins the OV5647 mode; left alone, libcamera picks the 1080p mode
+    # (32.8 fps max) for 720p because it is 16:9.
+    "480p": {"size": (640, 480), "fps": 60, "bitrate": 4_000_000, "ai": None, "sensor": (640, 480)},  # 62.5 max
+    "720p": {"size": (1280, 720), "fps": 46, "bitrate": 10_000_000, "ai": (640, 360), "sensor": (1296, 972)},  # 46.3
+    "1080p": {"size": (1920, 1080), "fps": 30, "bitrate": 15_000_000, "ai": (640, 360), "sensor": (1920, 1080)},  # 32.8
+}
+DEFAULT_QUALITY = "480p"
+
+
 class _OpenCVSource:
+    supports_live = False
+
     def __init__(self, src, width, height, fps):
         self.cap = cv2.VideoCapture(int(src) if str(src).isdigit() else src)
         self.is_file = not str(src).isdigit() and not str(src).startswith(("rtsp:", "http:"))
@@ -40,29 +55,63 @@ class _OpenCVSource:
 
 
 class _PiCameraSource:
-    def __init__(self, width, height, fps):
+    """Pi camera. In live mode it also streams: 640x480 at LIVE_FPS through the
+    Pi's hardware H.264 encoder to the local MediaMTX server (RTSP), and the AI
+    keeps reading the same frames."""
+
+    supports_live = True
+
+    def __init__(self, width, height, fps, live: tuple[str, str] | None = None):
         from picamera2 import Picamera2  # only on the Pi
 
+        self.live = live  # (rtsp url, quality) or None
         self.cam = Picamera2()
+        if live is None:
+            cfg = self.cam.create_video_configuration(
+                main={"size": (width, height), "format": "RGB888"},  # RGB888 is BGR in memory
+                controls={"FrameRate": fps},
+            )
+            self.cam.configure(cfg)
+            self.cam.start()
+            return
+
+        from picamera2.encoders import H264Encoder
+        from picamera2.outputs import FfmpegOutput
+
+        url, quality = live
+        q = LIVE_QUALITIES[quality]
+        self.ai_stream = "lores" if q["ai"] else "main"
         cfg = self.cam.create_video_configuration(
-            main={"size": (width, height), "format": "RGB888"},  # RGB888 is BGR in memory
-            controls={"FrameRate": fps},
+            main={"size": q["size"], "format": "YUV420"},  # the encoder's native input
+            lores={"size": q["ai"], "format": "YUV420"} if q["ai"] else None,
+            sensor={"output_size": q["sensor"], "bit_depth": 10},
+            # A little more sharpness/contrast than the defaults for a clearer picture.
+            controls={"FrameRate": q["fps"], "Sharpness": 1.5, "Contrast": 1.1},
+            buffer_count=6,
         )
         self.cam.configure(cfg)
-        self.cam.start()
+        # Key frame every second so a viewer can join quickly; repeat SPS/PPS for late joiners.
+        # High profile: better quality per bit than the default baseline profile.
+        encoder = H264Encoder(bitrate=q["bitrate"], repeat=True, iperiod=q["fps"], profile="high")
+        self.cam.start_recording(encoder, FfmpegOutput(f"-f rtsp -rtsp_transport tcp {url}"), name="main")
 
     def read(self):
-        return self.cam.capture_array("main")
+        if self.live is None:
+            return self.cam.capture_array("main")
+        return cv2.cvtColor(self.cam.capture_array(self.ai_stream), cv2.COLOR_YUV2BGR_I420)
 
     def close(self):
-        self.cam.stop()
+        if self.live is not None:
+            self.cam.stop_recording()
+        else:
+            self.cam.stop()
         self.cam.close()
 
 
-def _open(source, width, height, fps):
+def _open(source, width, height, fps, live=None):
     if source in ("auto", "picamera"):
         try:
-            return _PiCameraSource(width, height, fps)
+            return _PiCameraSource(width, height, fps, live)
         except Exception as e:  # noqa: BLE001 - fall back to USB camera
             if source == "picamera":
                 raise
@@ -82,6 +131,23 @@ class Camera:
         self._thread = threading.Thread(target=self._run, name="camera", daemon=True)
         self.fps = 0.0
         self.connected = False
+        self._live: tuple[str, str] | None = None  # (rtsp url, quality): stream there
+
+    @property
+    def live(self) -> bool:
+        return bool(self._src is not None and getattr(self._src, "live", None))
+
+    @property
+    def live_quality(self) -> str | None:
+        live = getattr(self._src, "live", None) if self._src is not None else None
+        return live[1] if live else None
+
+    def set_live(self, url: str | None, quality: str = DEFAULT_QUALITY):
+        """Start (url) or stop (None) live streaming, or change its quality;
+        applied by the camera thread."""
+        if quality not in LIVE_QUALITIES:
+            quality = DEFAULT_QUALITY
+        self._live = (url, quality) if url else None
 
     def start(self):
         self._thread.start()
@@ -90,11 +156,18 @@ class Camera:
     def _run(self):
         t0, n = time.monotonic(), 0
         while not self._stop.is_set():
+            want = self._live
+            if self._src is not None and want != getattr(self._src, "live", None):
+                if getattr(self._src, "supports_live", False) or want is None:
+                    log.info("camera switching to %s", "live %s (%d fps)" % (want[1], LIVE_QUALITIES[want[1]]["fps"])
+                             if want else "normal mode")
+                    self._src.close()
+                    self._src = None
             if self._src is None:
                 try:
-                    self._src = _open(*self.args)
+                    self._src = _open(*self.args, live=self._live)
                     self.connected = True
-                    log.info("camera opened: %s", self.args[0])
+                    log.info("camera opened: %s%s", self.args[0], " (live)" if self.live else "")
                 except Exception as e:  # noqa: BLE001
                     self.connected = False
                     log.warning("camera unavailable: %s (retrying)", e)

@@ -7,6 +7,7 @@ const config = {
   port: Number(process.env.PORT) || 3000,
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dms',
   mqttUrl: process.env.MQTT_URL || 'mqtt://127.0.0.1:1883',
+  rtspPort: Number(process.env.RTSP_PORT) || 8554, // MediaMTX on the Pi (live view)
   jwt: {
     secret: process.env.JWT_SECRET,
     accessTtl: '24h', // FR5.2

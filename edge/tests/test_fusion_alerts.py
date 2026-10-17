@@ -237,3 +237,42 @@ def test_stop_detecting_closes_open_alerts_and_resets():
     assert not p.alerts.is_open("e1") and p.open_events == {} and p.verified is False
     p._on_detection({"enabled": False})  # repeated (retained) message: no-op
     assert statuses == [True, False]
+
+
+# --- live view: on request, kept alive by the app, stops on its own ---
+
+def test_live_view_starts_on_request_and_stops_without_keepalive(monkeypatch):
+    from types import SimpleNamespace
+
+    from dms_edge import pipeline as pl
+
+    clock = [100.0]
+    monkeypatch.setattr(pl.time, "monotonic", lambda: clock[0])
+    urls = []
+    p = object.__new__(pl.Pipeline)
+    p.s = SimpleNamespace(rtsp_port=8554, device_id="pi-test")
+    p.camera = SimpleNamespace(live=False, live_quality=None,
+                               set_live=lambda url, quality="480p": urls.append(url and (url, quality)))
+    p.live_until = 0.0
+
+    p._on_live({"enabled": True})
+    assert urls == [("rtsp://127.0.0.1:8554/pi-test", "480p")]
+    p._on_live({"enabled": True, "quality": "720p"})
+    assert urls[-1] == ("rtsp://127.0.0.1:8554/pi-test", "720p")
+    assert p.live_until == 100.0 + pl.LIVE_KEEPALIVE
+    clock[0] += 30
+    p._on_live({"enabled": True, "quality": "720p"})  # the app's keep-alive extends it
+    assert p.live_until == 130.0 + pl.LIVE_KEEPALIVE
+
+    p._on_live({"enabled": False})
+    assert urls[-1] is None and p.live_until == 0.0
+
+
+def test_live_qualities_stay_within_the_ov5647_limits():
+    from dms_edge.camera import LIVE_QUALITIES
+
+    sensor_max = {(640, 480): 62.5, (1280, 720): 46.3, (1920, 1080): 32.8}
+    for name, q in LIVE_QUALITIES.items():
+        assert q["fps"] <= sensor_max[q["size"]], name
+        if q["ai"]:  # the AI copy keeps the stream's aspect ratio and stays small
+            assert q["ai"][0] == 640 and abs(q["ai"][0] / q["ai"][1] - q["size"][0] / q["size"][1]) < 0.01

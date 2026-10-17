@@ -49,6 +49,11 @@ function sendAck(device, edgeEventId) {
   publish(`dms/${device.deviceId}/cmd/ack`, { eventId: edgeEventId });
 }
 
+// Live view on/off (and quality); the app repeats `enabled: true` while watching.
+function requestLive(device, enabled, quality) {
+  publish(`dms/${device.deviceId}/cmd/live`, enabled ? { enabled, quality } : { enabled });
+}
+
 // action: 'preview' (stream the camera view), 'capture' (take photo + samples) or 'cancel'.
 function requestEnrollment(device, driver, action = 'preview') {
   publish(`dms/${device.deviceId}/cmd/enroll`, { driverId: driver.id, action });
@@ -116,5 +121,5 @@ async function close() {
 
 module.exports = {
   connect, close, handleMessage, publishConfig, publishDrivers, publishConfigForOwner,
-  publishDriversForOwner, publishDetection, sendAck, requestEnrollment, listUnpaired,
+  publishDriversForOwner, publishDetection, sendAck, requestEnrollment, requestLive, listUnpaired,
 };

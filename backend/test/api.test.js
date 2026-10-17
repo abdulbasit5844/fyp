@@ -165,6 +165,30 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   assert.equal(r.body.detectionEnabled, false);
   assert.equal(r.body.currentState, 'safe');
 
+  // Live view: the app gets the RTSP URL; MediaMTX asks us who may watch.
+  r = await api('POST', `/api/devices/${devId}/live`, { token, body: { enabled: true } });
+  assert.equal(r.status, 200);
+  const m = /^rtsp:\/\/live:([\w-]+)@127\.0\.0\.1:8554\/pi-test$/.exec(r.body.url);
+  assert.ok(m, r.body.url);
+  const ticket = m[1];
+  assert.ok(`live:${ticket}`.length < 128, 'fits FFmpeg\'s RTSP credential limit');
+  assert.equal(r.body.fps, 60);
+  assert.deepEqual(r.body.qualities.map((q) => `${q.name}@${q.fps}`), ['480p@60', '720p@46', '1080p@30']);
+  r = await api('POST', `/api/devices/${devId}/live`, { token, body: { enabled: true, quality: '720p' } });
+  assert.equal(r.body.resolution, '1280x720');
+  assert.equal(r.body.fps, 46);
+  assert.equal((await api('POST', `/api/devices/${devId}/live`, { token, body: { enabled: true, quality: '4k' } })).status, 400);
+  r = await api('POST', `/api/devices/${devId}/live`, { token, body: { enabled: true } }); // keep-alive
+  assert.ok(r.body.url.includes(ticket), 'keep-alive keeps the same URL');
+  const streamAuth = (body) => api('POST', '/api/stream/auth', { body });
+  assert.equal((await streamAuth({ action: 'read', path: 'pi-test', password: ticket })).status, 200);
+  assert.equal((await streamAuth({ action: 'read', path: 'pi-test', password: token })).status, 401);
+  assert.equal((await streamAuth({ action: 'read', path: 'someone-elses-car', password: ticket })).status, 401);
+  await api('POST', `/api/devices/${devId}/live`, { token, body: { enabled: false } });
+  assert.equal((await streamAuth({ action: 'read', path: 'pi-test', password: ticket })).status, 401, 'closed: ticket revoked');
+  assert.equal((await streamAuth({ action: 'publish', path: 'pi-test', ip: '127.0.0.1' })).status, 200);
+  assert.equal((await streamAuth({ action: 'publish', path: 'pi-test', ip: '10.0.0.9' })).status, 401);
+
   // Event 1: acknowledged from the app.
   const detectedAt = new Date().toISOString();
   await edge('pi-test', 'event', { eventId: 'e1', type: 'drowsiness', severity: 'critical', detectedAt, signals: { ear: 0.18, sustainedMs: 2400 } });

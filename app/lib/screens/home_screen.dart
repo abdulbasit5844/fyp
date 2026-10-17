@@ -11,6 +11,7 @@ import 'alert_screen.dart';
 import 'contacts_screen.dart';
 import 'devices_screen.dart';
 import 'events_screen.dart';
+import 'live_screen.dart';
 import 'settings_screen.dart';
 
 /// Home dashboard: live driver status, active alert banner, last event and
@@ -165,14 +166,14 @@ class _StatusCardState extends State<_StatusCard> {
                     ? FilledButton.icon(
                         onPressed: _busy || !device.online ? null : () => _toggle(true),
                         style: FilledButton.styleFrom(
-                            backgroundColor: safeColor, textStyle: const TextStyle(fontSize: 18)),
+                            backgroundColor: safeColor, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 18)),
                         icon: _busy ? _spinner() : const Icon(Icons.play_arrow),
                         label: const Text('Start detecting'),
                       )
                     : FilledButton.icon(
                         onPressed: _busy ? null : () => _toggle(false),
                         style: FilledButton.styleFrom(
-                            backgroundColor: criticalColor, textStyle: const TextStyle(fontSize: 18)),
+                            backgroundColor: criticalColor, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 18)),
                         icon: _busy ? _spinner() : const Icon(Icons.stop),
                         label: const Text('Stop detecting'),
                       ),
@@ -237,6 +238,7 @@ class _NavGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <(IconData, String, Widget Function())>[
+      (Icons.videocam, 'Live view', () => const LiveScreen()),
       (Icons.history, 'Event logs', () => const EventsScreen()),
       (Icons.contact_emergency, 'Emergency contacts', () => const ContactsScreen()),
       (Icons.tune, 'Settings', () => const SettingsScreen()),

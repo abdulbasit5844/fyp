@@ -8,6 +8,7 @@ MONGO_VERSION="7.0.40"
 MONGO_URL="https://github.com/themattman/mongodb-raspberrypi-binaries/releases/download/r${MONGO_VERSION}-rpi-unofficial/mongodb.ce.pi4.r${MONGO_VERSION}.tar.gz"
 LIBSSL11_URL="https://deb.debian.org/debian/pool/main/o/openssl/libssl1.1_1.1.1w-0+deb11u1_arm64.deb"
 NODE_MAJOR=22
+MEDIAMTX_VERSION="v1.21.2"
 
 echo "==> apt packages"
 apt-get update -y
@@ -90,6 +91,53 @@ CONF
 systemctl daemon-reload
 systemctl enable --now mongod mosquitto
 systemctl restart mosquitto
+
+echo "==> MediaMTX ${MEDIAMTX_VERSION} (live view: RTSP on :8554, viewers checked by the backend)"
+if ! /usr/local/bin/mediamtx --version 2>/dev/null | grep -q "${MEDIAMTX_VERSION}"; then
+  tmp=$(mktemp -d)
+  curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz" \
+    | tar -xz -C "$tmp" mediamtx
+  install -m 0755 "$tmp/mediamtx" /usr/local/bin/mediamtx
+  rm -rf "$tmp"
+fi
+cat >/etc/mediamtx.yml <<'CONF'
+logLevel: warn
+api: no
+metrics: no
+pprof: no
+playback: no
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+moq: no
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+# Every publish/read is checked by the backend: only the local edge pipeline
+# may publish; viewers need a valid app token for a device on their account.
+authMethod: http
+authHTTPAddress: http://127.0.0.1:3000/api/stream/auth
+paths:
+  all_others:
+CONF
+cat >/etc/systemd/system/mediamtx.service <<'UNIT'
+[Unit]
+Description=MediaMTX (DMS live view)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/mediamtx /etc/mediamtx.yml
+Restart=always
+RestartSec=3
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now mediamtx
+systemctl restart mediamtx
 
 echo "==> App user permissions"
 APP_USER="${SUDO_USER:-vision}"

@@ -18,6 +18,7 @@ class DeviceSettings:
     fps: int = int(os.getenv("DMS_FPS", "15"))
     mqtt_host: str = os.getenv("DMS_MQTT_HOST", "127.0.0.1")
     mqtt_port: int = int(os.getenv("DMS_MQTT_PORT", "1883"))
+    rtsp_port: int = int(os.getenv("DMS_RTSP_PORT", "8554"))  # local MediaMTX server for live view
     models_dir: Path = Path(os.getenv("DMS_MODELS_DIR", ROOT / "models"))
     clips_dir: Path = Path(os.getenv("DMS_CLIPS_DIR", "/var/lib/dms/clips"))
     storage_limit: float = float(os.getenv("DMS_STORAGE_LIMIT", "0.8"))  # FR4.3: 80 %
