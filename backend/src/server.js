@@ -7,6 +7,7 @@ const connectDB = require('./config/db');
 const createApp = require('./app');
 const wsHub = require('./realtime/wsHub');
 const bridge = require('./realtime/mqttBridge');
+const whatsapp = require('./services/whatsappService');
 
 async function main() {
   await connectDB();
@@ -19,6 +20,7 @@ async function main() {
 
   wsHub.attach(server);
   bridge.connect();
+  whatsapp.init();
 
   server.listen(config.port, () => {
     console.log(`[server] ${useTls ? 'https' : 'http'}://0.0.0.0:${config.port} (${config.env})`);

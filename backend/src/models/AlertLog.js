@@ -8,7 +8,7 @@ const alertLogSchema = new mongoose.Schema(
     event: { type: mongoose.Schema.Types.ObjectId, ref: 'SafetyEvent', required: true },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     alertType: { type: String, enum: ['alert', 'escalation'], required: true },
-    channel: { type: String, enum: ['push', 'sms', 'email'], required: true },
+    channel: { type: String, enum: ['push', 'sms', 'email', 'whatsapp'], required: true },
 
     recipientUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     recipientContact: { type: mongoose.Schema.Types.ObjectId, ref: 'EmergencyContact' },

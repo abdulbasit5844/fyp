@@ -28,6 +28,7 @@ const systemConfigSchema = new mongoose.Schema(
       push: { type: Boolean, default: true },
       sound: { type: Boolean, default: true },
       smsFallback: { type: Boolean, default: false },
+      whatsapp: { type: Boolean, default: true }, // escalations to every contact by WhatsApp
     },
 
     // Bumped on every change so the edge can tell whether it has the latest.

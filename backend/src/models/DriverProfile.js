@@ -29,6 +29,8 @@ const driverProfileSchema = new mongoose.Schema(
     isAuthorized: { type: Boolean, default: true },
     // Biometric data stays on the Pi; never returned by the API.
     faceEmbeddings: { type: [faceEmbeddingSchema], default: [], select: false, private: true },
+    // Small JPEG (base64) taken at enrollment, shown in the app's driver list.
+    photo: { type: String, default: null, maxlength: 200000 },
     lastVerifiedAt: Date,
   },
   { timestamps: true }

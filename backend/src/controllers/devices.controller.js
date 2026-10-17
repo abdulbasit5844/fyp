@@ -2,6 +2,7 @@ const { Device } = require('../models');
 const ApiError = require('../utils/ApiError');
 const pick = require('../utils/pick');
 const bridge = require('../realtime/mqttBridge');
+const ws = require('../realtime/wsHub');
 
 async function list(req, res) {
   const devices = await Device.find({ owner: req.ownerId })
@@ -30,7 +31,26 @@ async function pair(req, res) {
 
   await bridge.publishConfig(device);
   await bridge.publishDrivers(device);
+  bridge.publishDetection(device);
   res.status(existing ? 200 : 201).json(device);
+}
+
+// Start / Stop detecting the driver (from the app's home screen).
+async function setDetection(req, res) {
+  if (typeof req.body?.enabled !== 'boolean') throw ApiError.badRequest('enabled must be true or false');
+  const device = await Device.findOne({ _id: req.params.id, owner: req.ownerId })
+    .populate({ path: 'activeDriver', select: 'displayName' });
+  if (!device) throw ApiError.notFound('Device not found');
+  if (req.body.enabled && !device.online) throw ApiError.conflict('The vehicle unit is offline');
+  device.detectionEnabled = req.body.enabled;
+  if (!device.detectionEnabled) {
+    device.monitoring = false;
+    device.currentState = 'safe';
+  }
+  await device.save();
+  bridge.publishDetection(device);
+  ws.broadcast(req.ownerId, 'device', device.toJSON());
+  res.json(device);
 }
 
 async function get(req, res) {
@@ -54,4 +74,4 @@ async function unpair(req, res) {
   res.status(204).end();
 }
 
-module.exports = { list, discover, pair, get, update, unpair };
+module.exports = { list, discover, pair, get, update, unpair, setDetection };

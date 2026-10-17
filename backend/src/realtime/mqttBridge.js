@@ -32,6 +32,11 @@ async function publishDrivers(device) {
   })), { retain: true });
 }
 
+// Retained, so the unit picks up Start/Stop again after a reboot.
+function publishDetection(device) {
+  publish(`dms/${device.deviceId}/cmd/detection`, { enabled: Boolean(device.detectionEnabled) }, { retain: true });
+}
+
 async function forOwner(ownerId, fn) {
   const devices = await Device.find({ owner: ownerId });
   await Promise.all(devices.map(fn));
@@ -44,8 +49,9 @@ function sendAck(device, edgeEventId) {
   publish(`dms/${device.deviceId}/cmd/ack`, { eventId: edgeEventId });
 }
 
-function requestEnrollment(device, driver) {
-  publish(`dms/${device.deviceId}/cmd/enroll`, { driverId: driver.id });
+// action: 'preview' (stream the camera view), 'capture' (take photo + samples) or 'cancel'.
+function requestEnrollment(device, driver, action = 'preview') {
+  publish(`dms/${device.deviceId}/cmd/enroll`, { driverId: driver.id, action });
 }
 
 const listUnpaired = () => [...unpaired].map(([deviceId, lastSeenAt]) => ({ deviceId, lastSeenAt }));
@@ -93,6 +99,7 @@ function connect() {
     for (const d of await Device.find()) {
       await publishConfig(d);
       await publishDrivers(d);
+      publishDetection(d);
     }
   });
   client.on('message', (topic, buf) => {
@@ -109,5 +116,5 @@ async function close() {
 
 module.exports = {
   connect, close, handleMessage, publishConfig, publishDrivers, publishConfigForOwner,
-  publishDriversForOwner, sendAck, requestEnrollment, listUnpaired,
+  publishDriversForOwner, publishDetection, sendAck, requestEnrollment, listUnpaired,
 };

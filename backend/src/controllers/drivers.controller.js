@@ -36,19 +36,30 @@ async function remove(req, res) {
   res.status(204).end();
 }
 
-// Ask the edge device to capture this driver's face and send back an embedding.
+const ENROLL_MESSAGES = {
+  preview: 'Starting the camera…',
+  capture: 'Capturing. Hold still and look at the camera.',
+  cancel: 'Enrollment cancelled',
+};
+
+// Drives face enrollment on the edge device: 'preview' streams the camera view
+// to the app, 'capture' takes the photo and face samples, 'cancel' stops.
+// Progress and the result arrive over the WebSocket.
 async function enroll(req, res) {
+  const action = req.body?.action || 'preview';
+  if (!ENROLL_MESSAGES[action]) throw ApiError.badRequest('action must be preview, capture or cancel');
   const driver = await findOwned(req);
   const device = await Device.findOne({ owner: req.ownerId, ...(req.body?.deviceId && { _id: req.body.deviceId }) });
   if (!device) throw ApiError.badRequest('Pair a device before enrolling a driver');
-  if (!device.online) throw ApiError.conflict('The device is offline');
-  bridge.requestEnrollment(device, driver);
-  res.status(202).json({ message: 'Look at the camera. Enrollment takes a few seconds.' });
+  if (!device.online && action !== 'cancel') throw ApiError.conflict('The vehicle unit is offline');
+  bridge.requestEnrollment(device, driver, action);
+  res.status(202).json({ message: ENROLL_MESSAGES[action] });
 }
 
 async function clearEmbeddings(req, res) {
   const driver = await findOwned(req);
   driver.faceEmbeddings = [];
+  driver.photo = null;
   await driver.save();
   await bridge.publishDriversForOwner(req.ownerId);
   res.json(driver);

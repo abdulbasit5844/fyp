@@ -63,25 +63,50 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _StatusCard extends StatelessWidget {
+class _StatusCard extends StatefulWidget {
   const _StatusCard({required this.live});
   final LiveState live;
 
   @override
+  State<_StatusCard> createState() => _StatusCardState();
+}
+
+class _StatusCardState extends State<_StatusCard> {
+  bool _busy = false;
+
+  Future<void> _toggle(bool start) async {
+    setState(() => _busy = true);
+    try {
+      await widget.live.setDetection(start);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final live = widget.live;
     final device = live.device;
+    final stopped = device != null && !device.detectionEnabled;
     final state = live.state;
-    final color = stateColor(state);
-    final label = switch (state) {
-      DriverState.safe => 'SAFE',
-      DriverState.warning => 'WARNING',
-      DriverState.critical => 'CRITICAL',
-    };
-    final icon = switch (state) {
-      DriverState.safe => Icons.verified_user,
-      DriverState.warning => Icons.warning_amber_rounded,
-      DriverState.critical => Icons.crisis_alert,
-    };
+
+    final color = stopped ? Colors.blueGrey : stateColor(state);
+    final label = stopped
+        ? 'STOPPED'
+        : switch (state) {
+            DriverState.safe => 'SAFE',
+            DriverState.warning => 'WARNING',
+            DriverState.critical => 'CRITICAL',
+          };
+    final icon = stopped
+        ? Icons.pause_circle_outline
+        : switch (state) {
+            DriverState.safe => Icons.verified_user,
+            DriverState.warning => Icons.warning_amber_rounded,
+            DriverState.critical => Icons.crisis_alert,
+          };
 
     String subtitle;
     if (device == null) {
@@ -89,8 +114,10 @@ class _StatusCard extends StatelessWidget {
     } else if (!device.online) {
       final seen = device.lastSeenAt == null ? 'never' : DateFormat('d MMM, HH:mm').format(device.lastSeenAt!);
       subtitle = '${device.name} is offline (last seen $seen)';
+    } else if (stopped) {
+      subtitle = 'Driver detection is off. Press Start detecting when the driver is ready.';
     } else if (!device.monitoring) {
-      subtitle = '${device.name} is online, waiting for the driver';
+      subtitle = '${device.name} is detecting, waiting for the driver to sit facing the camera';
     } else {
       subtitle = '${device.name} • monitoring ${device.activeDriverName ?? 'unknown driver'}';
     }
@@ -107,11 +134,36 @@ class _StatusCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(color: color, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(subtitle, textAlign: TextAlign.center),
+            if (device != null) ...[
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: stopped
+                    ? FilledButton.icon(
+                        onPressed: _busy || !device.online ? null : () => _toggle(true),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: safeColor, textStyle: const TextStyle(fontSize: 18)),
+                        icon: _busy ? _spinner() : const Icon(Icons.play_arrow),
+                        label: const Text('Start detecting'),
+                      )
+                    : FilledButton.icon(
+                        onPressed: _busy ? null : () => _toggle(false),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: criticalColor, textStyle: const TextStyle(fontSize: 18)),
+                        icon: _busy ? _spinner() : const Icon(Icons.stop),
+                        label: const Text('Stop detecting'),
+                      ),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
+
+  Widget _spinner() =>
+      const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white));
 }
 
 class _AlertBanner extends StatelessWidget {
@@ -130,10 +182,7 @@ class _AlertBanner extends StatelessWidget {
         subtitle: Text('Tap to acknowledge • ${DateFormat.Hms().format(event.detectedAt)}',
             style: const TextStyle(color: Colors.white)),
         trailing: const Icon(Icons.chevron_right, color: Colors.white),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => AlertScreen(event: event),
-        )),
+        onTap: () => showAlertPopup(context, event),
       ),
     );
   }

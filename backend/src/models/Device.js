@@ -18,6 +18,8 @@ const deviceSchema = new mongoose.Schema(
     stateUpdatedAt: Date,
     activeDriver: { type: mongoose.Schema.Types.ObjectId, ref: 'DriverProfile', default: null },
     monitoring: { type: Boolean, default: false }, // true once the driver is verified
+    // Start/Stop detecting from the app. Off: the unit runs no detection and raises no alerts.
+    detectionEnabled: { type: Boolean, default: false },
 
     lastLocation: {
       type: { type: String, enum: ['Point'] },

@@ -5,6 +5,7 @@ import '../api/api_client.dart';
 import '../models.dart';
 import '../state/auth_state.dart';
 import 'contacts_screen.dart';
+import 'whatsapp_screen.dart';
 
 /// Monitoring settings (FR7.3). Saved values reach the vehicle unit over MQTT
 /// within a second. Only the owner can change them (FR5.4).
@@ -171,6 +172,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: const Text('Text contacts who do not have the app'),
                       value: s.smsFallback,
                       onChanged: (v) => _set(() => s.smsFallback = v),
+                    ),
+                    SwitchListTile(
+                      title: const Text('WhatsApp alerts'),
+                      subtitle: const Text('Message every emergency contact on WhatsApp when an alert escalates'),
+                      value: s.whatsapp,
+                      onChanged: (v) => _set(() => s.whatsapp = v),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.chat),
+                      title: const Text('WhatsApp account'),
+                      subtitle: const Text('Link the WhatsApp number that sends the alerts'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WhatsAppScreen())),
                     ),
                     SwitchListTile(
                       title: const Text('Record event video'),

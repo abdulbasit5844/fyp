@@ -15,6 +15,7 @@ class LiveState extends ChangeNotifier {
 
   final ApiClient api;
   final _alertController = StreamController<SafetyEvent>.broadcast();
+  final _enrollController = StreamController<EnrollmentUpdate>.broadcast();
 
   List<Device> devices = [];
   List<SafetyEvent> activeAlerts = [];
@@ -31,6 +32,9 @@ class LiveState extends ChangeNotifier {
 
   /// New alerts that should open the full-screen alert view.
   Stream<SafetyEvent> get newAlerts => _alertController.stream;
+
+  /// Face enrollment progress and results from the vehicle unit.
+  Stream<EnrollmentUpdate> get enrollment => _enrollController.stream;
 
   Device? get device => devices.isEmpty ? null : devices.first;
 
@@ -135,7 +139,22 @@ class LiveState extends ChangeNotifier {
         }
       case 'config':
         ackWindowSec = (data['ackWindowSec'] as num).round();
+      case 'enrollment_progress':
+        _enrollController.add(EnrollmentUpdate.progress(data));
+        return; // nothing on screen besides the enrollment dialog changes
+      case 'enrollment':
+        _enrollController.add(EnrollmentUpdate.result(data));
     }
+    notifyListeners();
+  }
+
+  /// Start or stop detecting the driver on the paired unit.
+  Future<void> setDetection(bool enabled) async {
+    final d = device;
+    if (d == null) return;
+    final updated = Device.fromJson(await api.post('/devices/${d.id}/detection', {'enabled': enabled}));
+    devices = [for (final x in devices) x.id == updated.id ? updated : x];
+    if (!enabled) activeAlerts = [];
     notifyListeners();
   }
 
@@ -150,6 +169,7 @@ class LiveState extends ChangeNotifier {
   void dispose() {
     stop();
     _alertController.close();
+    _enrollController.close();
     super.dispose();
   }
 }

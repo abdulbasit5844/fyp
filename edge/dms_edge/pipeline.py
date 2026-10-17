@@ -2,6 +2,7 @@
 → fusion → alerts, events, clips and status over MQTT."""
 from __future__ import annotations
 
+import base64
 import logging
 import threading
 import time
@@ -14,6 +15,7 @@ import numpy as np
 from . import __version__, drowsiness, head_pose
 from .alerts import AlertManager
 from .align import align_112
+from .calibration import DriverBaseline, Median3
 from .camera import Camera
 from .emotion import EmotionClassifier
 from .face_id import MODEL_NAME, FaceEmbedder, best_match
@@ -29,6 +31,42 @@ log = logging.getLogger(__name__)
 VERIFY_TIMEOUT = 10.0  # seconds of unrecognised face before an unverified_driver event
 REVERIFY_AFTER = 30.0  # face absent this long → possible driver change
 ENROLL_SAMPLES = 5
+ENROLL_SPACING = 0.15  # seconds between enrollment samples
+# Identity frames must be at least this good (enrollment and verification).
+MIN_ID_FACE_PX = 60
+MAX_ID_YAW, MAX_ID_PITCH = 40.0, 30.0  # generous: the generic head model overestimates turns
+MIN_SHARPNESS = 40.0  # variance of the Laplacian on the aligned 112x112 face
+EMOTION_SMOOTHING = 0.4  # weight of the newest prediction in the running average
+ENROLL_PREVIEW_TIMEOUT = 120.0  # live view stops if the app does not press Capture
+ENROLL_CAPTURE_TIMEOUT = 8.0  # seconds to collect the samples after Capture
+ENROLL_PROGRESS_EVERY = 0.4  # seconds between live-view frames sent to the app
+NO_PERSON = "No person detected in the camera. Sit in the driver's seat facing the camera."
+
+
+def _jpeg_b64(img, width: int, quality: int) -> str:
+    img = cv2.resize(img, (width, int(width * img.shape[0] / img.shape[1])))
+    ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return base64.b64encode(jpg.tobytes()).decode() if ok else ""
+
+
+def enrollment_preview(frame, face) -> str:
+    """Small JPEG (base64) of the camera view, with the detected face boxed."""
+    img = frame.copy()
+    if face is not None:
+        x, y, w, h = face.bbox
+        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 200, 0), 3)
+    return _jpeg_b64(img, 320, 60)
+
+
+def face_photo(frame, face) -> str:
+    """Square head-and-shoulders crop (base64 JPEG) saved as the driver's photo."""
+    x, y, w, h = face.bbox
+    side = int(max(w, h) * 1.6)
+    cx, cy = x + w // 2, y + h // 2
+    H, W = frame.shape[:2]
+    x0, y0 = max(0, cx - side // 2), max(0, cy - side // 2)
+    crop = frame[y0:min(H, y0 + side), x0:min(W, x0 + side)]
+    return _jpeg_b64(crop, 200, 80) if crop.size else ""
 
 
 def utcnow() -> str:
@@ -44,6 +82,8 @@ class Pipeline:
 
         m = s.models_dir
         self.landmarks = FaceLandmarks(m / "face_landmarker.task")
+        if not head_pose.use_canonical(m / "face_landmarker.task"):
+            log.warning("canonical face model unavailable; head pose uses the 6-point model")
         self.embedder = FaceEmbedder(m / "face_recognition_sface_2021dec_int8.onnx")
         try:
             self.emotion = EmotionClassifier(m)
@@ -64,7 +104,10 @@ class Pipeline:
             "drivers": self._on_drivers,
             "cmd/ack": self._app_ack,
             "cmd/enroll": self._on_enroll,
+            "cmd/detection": self._on_detection,
         })
+        # Start/Stop from the app (retained on MQTT). Stopped: no detection or alerts.
+        self.detecting = False
 
         # Identity
         self.driver: dict | None = None  # {"id", "name"} once verified
@@ -80,6 +123,10 @@ class Pipeline:
         self.state = "safe"
         self.last_status = 0.0
         self.last_emotion = (None, None)
+        self.emotion_avg: np.ndarray | None = None
+        # Per-driver calibration and per-signal smoothing (see calibration.py)
+        self.baseline = DriverBaseline()
+        self.smooth = {k: Median3() for k in ("ear", "closure", "yaw", "pitch")}
         self.timing = {"frames": 0, "infer": 0.0, "t0": time.monotonic()}
 
     # --- MQTT handlers ---
@@ -97,9 +144,41 @@ class Pipeline:
         enrolled = sum(1 for d in self.drivers if d.get("embeddings"))
         log.info("%d driver profiles (%d enrolled)", len(self.drivers), enrolled)
 
+    def _on_detection(self, payload: dict):
+        enabled = bool(payload.get("enabled"))
+        if enabled == self.detecting:
+            return
+        with self.lock:
+            self.detecting = enabled
+            if not enabled:
+                # Close whatever is open: no buzzer, no escalation while stopped.
+                for eid, _ in self.open_events.values():
+                    if self.alerts.is_open(eid):
+                        self._resolve_event(eid)
+                self.open_events.clear()
+                self.fusion.reset()
+                self.state = "safe"
+            # Verify the driver again on every start.
+            self.verified, self.driver = not self.verify_enabled, None
+            self.unverified_since, self.unverified_reported = None, False
+            self.match_streak = (None, 0)
+            self._reset_driver_model()
+        log.info("detection %s from the app", "started" if enabled else "stopped")
+        self._publish_status(time.monotonic(), force=True)
+
     def _on_enroll(self, payload: dict):
-        self.enroll = {"driverId": payload.get("driverId"), "vectors": [], "deadline": time.monotonic() + 15}
-        log.info("enrollment requested for driver %s", payload.get("driverId"))
+        """preview: stream the camera view to the app; capture: take the photo and
+        samples now; cancel: stop."""
+        action, driver_id = payload.get("action", "preview"), payload.get("driverId")
+        if action == "cancel":
+            if self.enroll and self.enroll["driverId"] == driver_id:
+                self.enroll = None
+            return
+        now = time.monotonic()
+        timeout = ENROLL_CAPTURE_TIMEOUT if action == "capture" else ENROLL_PREVIEW_TIMEOUT
+        self.enroll = {"driverId": driver_id, "mode": action, "vectors": [], "photo": None,
+                       "deadline": now + timeout, "last_progress": 0.0}
+        log.info("enrollment %s for driver %s", action, driver_id)
 
     # --- alert callbacks ---
 
@@ -155,29 +234,66 @@ class Pipeline:
     # --- identity ---
 
     def _embedding(self, frame, face):
+        """Face embedding, only from frames good enough to identify someone:
+        large enough, roughly frontal and not blurred. Bad frames return None."""
+        if face.bbox[2] < MIN_ID_FACE_PX:
+            return None
+        h, w = frame.shape[:2]
+        pose = head_pose.estimate(face.points, w, h)
+        if pose is None or abs(pose[0]) > MAX_ID_YAW or abs(pose[1]) > MAX_ID_PITCH:
+            return None
         aligned = align_112(frame, face.five_points())
-        return None if aligned is None else self.embedder.embed(aligned)
+        if aligned is None:
+            return None
+        if cv2.Laplacian(cv2.cvtColor(aligned, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < MIN_SHARPNESS:
+            return None
+        return self.embedder.embed(aligned)
 
     def _handle_enrollment(self, frame, face):
         e = self.enroll
-        if time.monotonic() > e["deadline"]:
-            self.mqtt.publish("enrollment", {"driverId": e["driverId"], "ok": False,
-                                             "error": "No face seen clearly enough. Try again in better light."})
-            self.enroll = None
+        now = time.monotonic()
+        capturing = e["mode"] == "capture"
+        if now > e["deadline"]:
+            if not capturing:
+                error = "Live view stopped. Press Try again to restart it."
+            elif not e["vectors"]:
+                error = NO_PERSON
+            else:
+                error = "Face not seen clearly enough. Hold still in good light and try again."
+            self._finish_enrollment(e, ok=False, error=error)
             return
-        if face is None:
-            return
-        vec = self._embedding(frame, face)
-        if vec is not None:
-            e["vectors"].append(vec)
-        if len(e["vectors"]) >= ENROLL_SAMPLES:
-            mean = np.mean(e["vectors"], axis=0)
-            mean /= np.linalg.norm(mean)
-            self.mqtt.publish("enrollment", {"driverId": e["driverId"], "ok": True, "model": MODEL_NAME,
-                                             "vector": [round(float(v), 6) for v in mean]})
-            log.info("enrollment for %s complete", e["driverId"])
-            self.enroll = None
-            self.verified = False  # re-verify against the new profile
+
+        # Samples at least ENROLL_SPACING apart, so they cover small natural movements.
+        if capturing and face is not None and now - e.get("last_sample", 0.0) >= ENROLL_SPACING:
+            vec = self._embedding(frame, face)
+            if vec is not None:
+                e["last_sample"] = now
+                e["vectors"].append(vec)
+                if e["photo"] is None:
+                    e["photo"] = face_photo(frame, face)
+            if len(e["vectors"]) >= ENROLL_SAMPLES:
+                mean = np.mean(e["vectors"], axis=0)
+                mean /= np.linalg.norm(mean)
+                self._finish_enrollment(e, ok=True, model=MODEL_NAME, photo=e["photo"],
+                                        vector=[round(float(v), 6) for v in mean])
+                self.verified = False  # re-verify against the new profile
+                return
+
+        if now - e["last_progress"] >= ENROLL_PROGRESS_EVERY:
+            e["last_progress"] = now
+            self.mqtt.publish("enrollment", {
+                "driverId": e["driverId"], "status": "progress", "mode": e["mode"],
+                "samples": len(e["vectors"]), "needed": ENROLL_SAMPLES,
+                "faceVisible": face is not None,
+                "secondsLeft": max(0, round(e["deadline"] - now)),
+                "preview": enrollment_preview(frame, face),
+            })
+
+    def _finish_enrollment(self, e, ok: bool, **fields):
+        self.mqtt.publish("enrollment", {"driverId": e["driverId"], "status": "done" if ok else "failed",
+                                         "ok": ok, **fields})
+        log.info("enrollment for %s %s", e["driverId"], "complete" if ok else f"failed: {fields.get('error')}")
+        self.enroll = None
 
     def _verify(self, frame, face, now):
         """Returns True once the driver may be monitored."""
@@ -213,19 +329,47 @@ class Pipeline:
 
     # --- per-frame work ---
 
+    def _reset_driver_model(self):
+        """New driver or new session: calibrate again and forget smoothed history."""
+        self.baseline.reset()
+        for f in self.smooth.values():
+            f.reset()
+        self.emotion_avg = None
+        self.last_emotion = (None, None)
+
     def _analyse(self, frame, faces, now, frame_no) -> Signals:
         if not faces:
+            for f in self.smooth.values():
+                f.reset()
             return Signals(face=False)
         face = faces[0]
         h, w = frame.shape[:2]
-        ear = drowsiness.face_ear(face.points)
         pose = head_pose.estimate(face.points, w, h)
-        if self.emotion and frame_no % self.s.emotion_every_n == 0:
+        yaw, pitch, roll = pose if pose else (None, None, None)
+        sm = self.smooth
+        ear = sm["ear"](drowsiness.face_ear(face.points))
+        closure = sm["closure"](face.eye_closure)
+        yaw, pitch = sm["yaw"](yaw), sm["pitch"](pitch)
+
+        # Learn this driver's normal eyes / head position, then judge relative to it.
+        if not self.baseline.ready:
+            self.baseline.add(ear, closure, yaw, pitch)
+            if self.baseline.ready:
+                b = self.baseline
+                log.info("calibrated driver: open EAR %.3f, eye closure %s, neutral yaw %.0f° pitch %.0f°",
+                         b.ear_open, "n/a" if b.closure_open is None else f"{b.closure_open:.2f}", b.yaw0, b.pitch0)
+        rel_yaw, rel_pitch = self.baseline.relative_pose(yaw, pitch)
+        closed = self.baseline.eyes_closed(ear, closure, self.cfg.earThreshold)
+
+        if self.emotion and frame_no % self.s.emotion_every_n == 0 and face.bbox[2] >= MIN_ID_FACE_PX:
             pred = self.emotion.predict(frame, face)
             if pred:
-                self.last_emotion = pred[:2]
-        yaw, pitch, roll = pose if pose else (None, None, None)
-        return Signals(True, ear, yaw, pitch, roll, *self.last_emotion)
+                probs = np.array([pred[2][k] for k in self.emotion.labels], np.float64)
+                self.emotion_avg = probs if self.emotion_avg is None else (
+                    (1 - EMOTION_SMOOTHING) * self.emotion_avg + EMOTION_SMOOTHING * probs)
+                i = int(self.emotion_avg.argmax())
+                self.last_emotion = (self.emotion.labels[i], float(self.emotion_avg[i]))
+        return Signals(True, ear, rel_yaw, rel_pitch, roll, *self.last_emotion, eyes_closed=closed)
 
     def _apply_fusion(self, sig, now):
         result = self.fusion.update(sig, now)
@@ -235,9 +379,11 @@ class Pipeline:
                 self._resolve_event(previous[0])
             eid = self._raise_event(t.type, t.severity, t.description, sig, t.sustained_ms)
             self.open_events[t.type] = (eid, t.severity)
+        # The driver is back to normal: close the alert (stops the buzzer and,
+        # for critical alerts, the escalation countdown) so the app shows safe.
         for cond in result.cleared:
-            eid, sev = self.open_events.pop(cond, (None, None))
-            if eid and sev == "warning":
+            eid, _ = self.open_events.pop(cond, (None, None))
+            if eid and self.alerts.is_open(eid):
                 self._resolve_event(eid)
         self.state = result.state
 
@@ -248,7 +394,8 @@ class Pipeline:
         self.mqtt.publish("status", {
             "online": True,
             "state": self.state,
-            "monitoring": self.verified,
+            "detecting": self.detecting,
+            "monitoring": self.detecting and self.verified,
             "driverId": self.driver["id"] if self.driver else None,
             "location": self.gps.position,
             "pipelineVersion": __version__,
@@ -288,8 +435,12 @@ class Pipeline:
                     self._publish_status(now)
                     continue
                 frame_no += 1
+                if not self.detecting and not self.enroll:  # stopped from the app: idle
+                    self._publish_status(now)
+                    continue
                 t0 = time.perf_counter()
-                self.recorder.push(frame)
+                if self.detecting:
+                    self.recorder.push(frame)
 
                 faces = self.landmarks.detect(frame, int(now * 1000))
                 face = faces[0] if faces else None
@@ -299,9 +450,13 @@ class Pipeline:
                     log.info("face absent %ss: will re-verify the driver", int(REVERIFY_AFTER))
                     self.verified, self.driver, self.unverified_since = False, None, None
                     self.fusion.reset()
+                    self._reset_driver_model()
 
                 if self.enroll:
                     self._handle_enrollment(frame, face)
+                if not self.detecting:  # only here for enrollment
+                    self._publish_status(now)
+                    continue
 
                 sig = Signals(face=False)
                 if not self.verified:

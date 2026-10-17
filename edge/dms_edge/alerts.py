@@ -122,6 +122,11 @@ class AlertManager:
                 log.info("alert %s acknowledged from app", event_id)
                 self._drive_outputs()
 
+    def is_open(self, event_id) -> bool:
+        """False once acknowledged or escalated."""
+        with self._lock:
+            return event_id in self.open
+
     def resolve(self, event_id):
         with self._lock:
             if self.open.pop(event_id, None):

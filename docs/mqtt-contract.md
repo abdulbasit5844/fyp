@@ -13,7 +13,7 @@ Broker: Mosquitto on the Pi, `127.0.0.1:1883`, localhost only. Every payload is 
 | `dms/{id}/event/escalate` | 1 | `{eventId, location?: {lat, lng, accuracyM, capturedAt}, ts}`: acknowledgment window expired |
 | `dms/{id}/event/resolve` | 1 | `{eventId, ts}`: condition cleared (warnings only) |
 | `dms/{id}/clip` | 1 | `{eventId, filePath, status: "available"\|"deleted", sizeBytes?, durationSec?, preEventSec?, postEventSec?, startedAt?}` |
-| `dms/{id}/enrollment` | 1 | `{driverId, ok, vector?, model?, error?}` |
+| `dms/{id}/enrollment` | 1 | Result: `{driverId, status: "done"\|"failed", ok, vector?, model?, error?}`. While capturing, every 0.5 s: `{driverId, status: "progress", samples, needed, faceVisible, secondsLeft, preview}` (`preview` = base64 JPEG, 320 px wide) |
 
 `type` is one of `drowsiness`, `inattention`, `emotional_distress`, `unverified_driver`,
 `unauthorized_occupant`, `key_left_inside`.
@@ -25,6 +25,7 @@ Broker: Mosquitto on the Pi, `127.0.0.1:1883`, localhost only. Every payload is 
 | `dms/{id}/config` | 1, retained | `{earThreshold, earSustainSec, headPoseThresholdDeg, headPoseSustainSec, emotionSustainSec, ackWindowSec, alertSensitivity, videoRecordingEnabled, notifications, revision}` |
 | `dms/{id}/drivers` | 1, retained | `[{id, displayName, isAuthorized, embeddings: [{vector, model}]}]` |
 | `dms/{id}/cmd/ack` | 1 | `{eventId}`: acknowledged from the mobile app; the edge stops the alarm and cancels escalation |
+| `dms/{id}/cmd/detection` | 1, retained | `{enabled}`: Start/Stop detecting from the app. Stopped: no detection, recording or alerts (enrollment still works); open alerts are resolved |
 | `dms/{id}/cmd/enroll` | 1 | `{driverId}`: capture the current face and reply on `dms/{id}/enrollment` |
 
 ## Alert lifecycle

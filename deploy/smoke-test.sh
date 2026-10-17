@@ -35,12 +35,20 @@ curl -sf "${H[@]}" -X POST $API/contacts -d '{"name":"Test","phone":"+9230012345
   && ok "add emergency contact" || bad "add emergency contact"
 
 echo "== edge link (MQTT)"
-for i in $(seq 1 30); do
-  curl -s "${H[@]}" $API/devices/discover | grep -q "$DEV" && break; sleep 2
+mosquitto_sub -h 127.0.0.1 -t "dms/$DEV/status" -C 1 -W 10 | grep -q '"online": true' \
+  && ok "edge pipeline publishing on MQTT" || bad "edge pipeline not publishing on MQTT"
+
+# The real unit is normally paired to the owner's account, so the rest of the
+# path is checked with a stand-in device that this test pairs and removes.
+DEV="smoke-dev-$(date +%s)"
+for i in $(seq 1 10); do
+  mosquitto_pub -h 127.0.0.1 -q 1 -t "dms/$DEV/status" -m '{"online":true,"state":"safe"}'
+  curl -s "${H[@]}" $API/devices/discover | grep -q "$DEV" && break; sleep 1
 done
-curl -s "${H[@]}" $API/devices/discover | grep -q "$DEV" && ok "edge pipeline seen on MQTT" || bad "edge pipeline not seen on MQTT"
+curl -s "${H[@]}" $API/devices/discover | grep -q "$DEV" && ok "new device discovered" || bad "new device not discovered"
 curl -s "${H[@]}" -X POST $API/devices -d "{\"deviceId\":\"$DEV\",\"name\":\"Smoke test car\"}" >/dev/null
-sleep 3
+mosquitto_pub -h 127.0.0.1 -q 1 -t "dms/$DEV/status" -m '{"online":true,"state":"safe"}'
+sleep 2
 devid=$(curl -s "${H[@]}" $API/devices | json 'o[0]?o[0].id:""')
 state=$(curl -s "${H[@]}" $API/devices | json 'o[0]&&o[0].online')
 [[ "$state" == "true" ]] && ok "device paired and online" || bad "device online ($state)"

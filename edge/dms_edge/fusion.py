@@ -32,6 +32,9 @@ class Signals:
     roll: float | None = None
     emotion: str | None = None
     emotion_conf: float | None = None
+    # Per-driver decision from calibration (blendshapes / personal EAR); when
+    # None, the fixed EAR threshold from the settings is used instead.
+    eyes_closed: bool | None = None
 
 
 @dataclass
@@ -60,7 +63,10 @@ class Fusion:
         c, k = self.cfg, self.cfg.sensitivity_factor
         out = {}
 
-        closed = s.face and s.ear is not None and s.ear < c.earThreshold
+        if s.eyes_closed is not None:
+            closed = s.face and s.eyes_closed
+        else:
+            closed = s.face and s.ear is not None and s.ear < c.earThreshold
         held = self.timers["drowsiness"].update(closed, now)
         need = c.earSustainSec * k
         if held >= need:

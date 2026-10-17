@@ -18,6 +18,8 @@ const createApp = require('../src/app');
 const bridge = require('../src/realtime/mqttBridge');
 const { User } = require('../src/models');
 const notify = require('../src/services/notificationService');
+const ws = require('../src/realtime/wsHub');
+const whatsapp = require('../src/services/whatsappService');
 
 let mongo; let server; let base;
 
@@ -152,6 +154,17 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   assert.equal(r.body[0].currentState, 'warning');
   assert.equal(r.body[0].online, true);
 
+  // Start / Stop detecting from the app.
+  const devId = r.body[0].id;
+  assert.equal(r.body[0].detectionEnabled, false, 'stopped until the user presses Start');
+  r = await api('POST', `/api/devices/${devId}/detection`, { token, body: { enabled: 'yes' } });
+  assert.equal(r.status, 400);
+  r = await api('POST', `/api/devices/${devId}/detection`, { token, body: { enabled: true } });
+  assert.equal(r.body.detectionEnabled, true);
+  r = await api('POST', `/api/devices/${devId}/detection`, { token, body: { enabled: false } });
+  assert.equal(r.body.detectionEnabled, false);
+  assert.equal(r.body.currentState, 'safe');
+
   // Event 1: acknowledged from the app.
   const detectedAt = new Date().toISOString();
   await edge('pi-test', 'event', { eventId: 'e1', type: 'drowsiness', severity: 'critical', detectedAt, signals: { ear: 0.18, sustainedMs: 2400 } });
@@ -172,6 +185,8 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   // Event 2: escalated with GPS, contacts notified (push/SMS fail: not configured; email is captured).
   const sent = [];
   notify.setMailTransport({ sendMail: async (m) => { sent.push(m); return { messageId: 'mail-1' }; } });
+  const waSent = [];
+  whatsapp.setTestSender(async (phone, text) => { waSent.push({ phone, text }); return { ok: true, id: 'wa-1' }; });
   const [dad] = (await api('GET', '/api/contacts', { token })).body;
   await api('PATCH', `/api/contacts/${dad.id}`, { token, body: { email: 'dad@example.com' } });
   await edge('pi-test', 'event', { eventId: 'e2', type: 'inattention', severity: 'critical', detectedAt: new Date().toISOString() });
@@ -189,8 +204,24 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   assert.equal(mailed.deliveryStatus, 'sent');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, 'dad@example.com');
-  assert.match(sent[0].html, /maps\.google\.com\/\?q=33\.6844,73\.0479/);
+  assert.doesNotMatch(sent[0].html, /maps\.google|Location/, 'no location in the email');
   notify.setMailTransport(null);
+  // WhatsApp: one message per contact, to their phone number.
+  assert.equal(r.body.notifications.find((n) => n.channel === 'whatsapp').deliveryStatus, 'sent');
+  assert.deepEqual(waSent.map((m) => m.phone), [dad.phone]);
+  assert.match(waSent[0].text, /EMERGENCY ALERT/);
+  assert.doesNotMatch(waSent[0].text, /maps\.google|Location/, 'no location in the WhatsApp message');
+  whatsapp.setTestSender(null);
+
+  // The driver recovers: an open critical alert clears to resolved, but a
+  // later "resolve" never overwrites an acknowledged alert.
+  await edge('pi-test', 'event', { eventId: 'r1', type: 'drowsiness', severity: 'critical', detectedAt: new Date().toISOString() });
+  await edge('pi-test', 'event/resolve', { eventId: 'r1' });
+  r = await api('GET', '/api/events?type=drowsiness&severity=critical&limit=1', { token });
+  assert.equal(r.body.items[0].status, 'resolved');
+  await edge('pi-test', 'event/resolve', { eventId: 'e1' });
+  r = await api('GET', `/api/events/${e1}`, { token });
+  assert.equal(r.body.status, 'acknowledged');
 
   // Physical button ack on event 3.
   await edge('pi-test', 'event', { eventId: 'e3', type: 'emotional_distress', severity: 'warning', detectedAt: new Date().toISOString() });
@@ -218,6 +249,45 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   assert.equal(r.status, 403);
 });
 
+test('face enrollment: request, live progress, result', async () => {
+  const { token } = state;
+  const sent = [];
+  const realBroadcast = ws.broadcast;
+  ws.broadcast = (owner, type, data) => sent.push({ type, data });
+  try {
+    let r = await api('POST', '/api/drivers', { token, body: { displayName: 'Ali' } });
+    const driverId = r.body.id;
+    for (const action of ['preview', 'capture', 'cancel']) {
+      r = await api('POST', `/api/drivers/${driverId}/enroll`, { token, body: { action } });
+      assert.equal(r.status, 202, action);
+    }
+    r = await api('POST', `/api/drivers/${driverId}/enroll`, { token, body: { action: 'explode' } });
+    assert.equal(r.status, 400);
+
+    // The live view is relayed to the app (with the preview) and nothing is stored yet.
+    const view = { mode: 'preview', samples: 0, needed: 5, faceVisible: false, secondsLeft: 100, preview: 'abc' };
+    await edge('pi-test', 'enrollment', { driverId, status: 'progress', ...view });
+    assert.deepEqual(sent.find((m) => m.type === 'enrollment_progress').data, { driverId, ...view });
+    r = await api('GET', '/api/drivers', { token });
+    assert.equal(r.body.find((d) => d.id === driverId).enrolled, false);
+
+    // A failure is reported without storing anything.
+    await edge('pi-test', 'enrollment', { driverId, status: 'failed', ok: false, error: 'No person detected in the camera' });
+    assert.deepEqual(sent.at(-1), { type: 'enrollment', data: { driverId, ok: false, error: 'No person detected in the camera' } });
+
+    // Success stores the embedding and the photo.
+    await edge('pi-test', 'enrollment', { driverId, status: 'done', ok: true, model: 'sface', vector: Array(128).fill(0.1), photo: 'jpegdata' });
+    assert.equal(sent.at(-1).data.ok, true);
+    assert.equal(sent.at(-1).data.photo, 'jpegdata');
+    r = await api('GET', '/api/drivers', { token });
+    const ali = r.body.find((d) => d.id === driverId);
+    assert.equal(ali.enrolled, true);
+    assert.equal(ali.photo, 'jpegdata');
+  } finally {
+    ws.broadcast = realBroadcast;
+  }
+});
+
 test('another owner cannot see or touch this data', async () => {
   const other = await api('POST', '/api/auth/register', { body: { name: 'Eve', email: 'eve@x.com', password: 'password123' } });
   const token = other.body.accessToken;
@@ -233,7 +303,7 @@ test('family members see owner data but cannot change settings', async () => {
   assert.equal(r.status, 201);
   r = await api('POST', '/api/auth/login', { body: { email: 'sis@x.com', password: 'password123' } });
   const token = r.body.accessToken;
-  assert.equal((await api('GET', '/api/events', { token })).body.total, 4);
+  assert.equal((await api('GET', '/api/events', { token })).body.total, 5);
   assert.equal((await api('PATCH', '/api/config', { token, body: { earThreshold: 0.2 } })).status, 403);
 });
 

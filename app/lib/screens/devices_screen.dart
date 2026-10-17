@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +9,7 @@ import '../models.dart';
 import '../state/auth_state.dart';
 import '../state/live_state.dart';
 import '../theme.dart';
+import 'enroll_dialog.dart';
 
 /// Pair the Raspberry Pi with this account and manage the drivers whose faces
 /// it should recognise.
@@ -98,16 +101,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
   }
 
   Future<void> _enroll(DriverProfile d) async {
-    try {
-      final res = await _api.post('/drivers/${d.id}/enroll');
-      _snack('${res['message']}');
-      // The unit replies within ~15 s; refresh a little later to show the result.
-      Future.delayed(const Duration(seconds: 8), () {
-        if (mounted) _loadDrivers();
-      });
-    } catch (e) {
-      _snack(e.toString());
+    final live = context.read<LiveState>();
+    if (live.device == null) {
+      _snack('Pair a vehicle unit first');
+      return;
     }
+    await showEnrollDialog(context, _api, live, d);
+    if (mounted) _loadDrivers();
   }
 
   Future<void> _toggleAuthorized(DriverProfile d) async {
@@ -170,10 +170,22 @@ class _DevicesScreenState extends State<DevicesScreen> {
             for (final d in _drivers)
               Card(
                 child: ListTile(
-                  leading: Icon(d.isAuthorized ? Icons.verified_user : Icons.block,
-                      color: d.isAuthorized ? safeColor : criticalColor),
+                  leading: CircleAvatar(
+                    radius: 24,
+                    backgroundImage: d.photo != null ? MemoryImage(base64Decode(d.photo!)) : null,
+                    child: d.photo == null ? const Icon(Icons.person) : null,
+                  ),
                   title: Text('${d.displayName}${d.isPrimary ? ' (primary)' : ''}'),
-                  subtitle: Text(d.enrolled ? 'Face enrolled' : 'Face not enrolled yet'),
+                  subtitle: Row(children: [
+                    Icon(d.isAuthorized ? Icons.verified_user : Icons.block,
+                        size: 16, color: d.isAuthorized ? safeColor : criticalColor),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text('${d.isAuthorized ? 'Allowed' : 'Blocked'} • '
+                          '${d.enrolled ? 'Face enrolled' : 'Face not enrolled yet'}'),
+                    ),
+                  ]),
+                  onTap: owner && !d.enrolled ? () => _enroll(d) : null,
                   trailing: owner
                       ? PopupMenuButton<String>(
                           onSelected: (v) => switch (v) {

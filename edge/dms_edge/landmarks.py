@@ -1,13 +1,18 @@
-"""478-point face mesh landmarks in pixel space.
+"""478-point face mesh landmarks in pixel space, plus MediaPipe blendshapes.
 
 Two backends give the same points (MediaPipe's face_landmarks_detector model):
 
 * LiteRT (Pi): YuNet finds the face, then the face mesh model from inside
   face_landmarker.task runs on a rotated, square crop. Later frames crop from the
-  previous landmarks, as MediaPipe does, and YuNet only runs again when the face
-  is lost. Used on the Pi 4 because MediaPipe >= 1.0 wheels need the ARMv8 AES
-  extension, which the Pi 4's Cortex-A72 lacks.
+  previous landmarks, as MediaPipe does; YuNet runs again when the face is lost
+  and once a second to make sure tracking has not drifted to another face. Used
+  on the Pi 4 because MediaPipe >= 1.0 wheels need the ARMv8 AES extension,
+  which the Pi 4's Cortex-A72 lacks.
 * MediaPipe Tasks (laptop): used when ai-edge-litert is not installed.
+
+Both also return the 52 blendshape scores (eyeBlinkLeft/Right, jawOpen, …) from
+the face_blendshapes model in the same .task file; the LiteRT path matches
+MediaPipe's output exactly.
 """
 from __future__ import annotations
 
@@ -23,12 +28,40 @@ YUNET = "face_detection_yunet_2023mar.onnx"
 MESH_SIZE = 256
 ROI_SCALE = 1.5  # crop side = 1.5 x face size, as in MediaPipe's face landmark graph
 PRESENCE_MIN = 0.5
+REDETECT_EVERY = 10  # frames between detector checks while tracking (~1 s)
+DARK_MEAN = 80  # frames darker than this (0-255) are contrast-enhanced first
+
+# Output order of face_blendshapes.tflite (ARKit names, as MediaPipe reports them).
+BLEND_NAMES = [
+    "_neutral", "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+    "cheekPuff", "cheekSquintLeft", "cheekSquintRight", "eyeBlinkLeft", "eyeBlinkRight", "eyeLookDownLeft",
+    "eyeLookDownRight", "eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft", "eyeLookOutRight", "eyeLookUpLeft",
+    "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight", "eyeWideLeft", "eyeWideRight", "jawForward", "jawLeft",
+    "jawOpen", "jawRight", "mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft", "mouthFrownRight",
+    "mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight", "mouthPressLeft", "mouthPressRight",
+    "mouthPucker", "mouthRight", "mouthRollLower", "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper",
+    "mouthSmileLeft", "mouthSmileRight", "mouthStretchLeft", "mouthStretchRight", "mouthUpperUpLeft",
+    "mouthUpperUpRight", "noseSneerLeft", "noseSneerRight",
+]
+BLINK_LEFT, BLINK_RIGHT = BLEND_NAMES.index("eyeBlinkLeft"), BLEND_NAMES.index("eyeBlinkRight")
+
+# The 146 mesh points the blendshape model reads (MediaPipe face_blendshapes_graph).
+BLEND_INPUT = [
+    0, 1, 4, 5, 6, 7, 8, 10, 13, 14, 17, 21, 33, 37, 39, 40, 46, 52, 53, 54, 55, 58, 61, 63, 65, 66, 67, 70, 78, 80,
+    81, 82, 84, 87, 88, 91, 93, 95, 103, 105, 107, 109, 127, 132, 133, 136, 144, 145, 146, 148, 149, 150, 152, 153,
+    154, 155, 157, 158, 159, 160, 161, 162, 163, 168, 172, 173, 176, 178, 181, 185, 191, 195, 197, 234, 246, 249,
+    251, 263, 267, 269, 270, 276, 282, 283, 284, 285, 288, 291, 293, 295, 296, 297, 300, 308, 310, 311, 312, 314,
+    317, 318, 321, 323, 324, 332, 334, 336, 338, 356, 361, 362, 365, 373, 374, 375, 377, 378, 379, 380, 381, 382,
+    384, 385, 386, 387, 388, 389, 390, 397, 398, 400, 402, 405, 409, 415, 454, 466, 468, 469, 470, 471, 472, 473,
+    474, 475, 476, 477,
+]
 
 
 @dataclass
 class Face:
     points: np.ndarray  # (478, 2) pixel coordinates
     bbox: tuple[int, int, int, int]  # x, y, w, h
+    blend: np.ndarray | None = None  # 52 blendshape scores (BLEND_NAMES order)
 
     # Five alignment points (viewer's left eye, right eye, nose, left mouth, right mouth)
     # in the order of the ArcFace 112x112 template used by SFace and the FER model.
@@ -38,11 +71,29 @@ class Face:
         right_eye = p[473] if len(p) > 473 else p[[362, 263]].mean(axis=0)
         return np.array([left_eye, right_eye, p[1], p[61], p[291]], dtype=np.float32)
 
+    @property
+    def eye_closure(self) -> float | None:
+        """0 = eyes wide open … 1 = closed (mean of both eyeBlink scores)."""
+        if self.blend is None:
+            return None
+        return float((self.blend[BLINK_LEFT] + self.blend[BLINK_RIGHT]) / 2)
 
-def _face_from_points(pts: np.ndarray) -> Face:
+
+def _face_from_points(pts: np.ndarray, blend=None) -> Face:
     x0, y0 = pts.min(axis=0)
     x1, y1 = pts.max(axis=0)
-    return Face(pts, (int(x0), int(y0), int(x1 - x0), int(y1 - y0)))
+    return Face(pts, (int(x0), int(y0), int(x1 - x0), int(y1 - y0)), blend)
+
+
+def enhance_if_dark(frame_bgr: np.ndarray) -> np.ndarray:
+    """Local contrast enhancement (CLAHE on luminance) for dim cabins, so faces
+    are still found at night or against a bright window."""
+    small = cv2.resize(frame_bgr, (80, 60), interpolation=cv2.INTER_AREA)
+    if small.mean() >= DARK_MEAN:
+        return frame_bgr
+    lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+    lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
 
 def roi_transform(center, size: float, angle: float) -> np.ndarray:
@@ -66,6 +117,7 @@ class _LiteRtMesh:
 
         with zipfile.ZipFile(task_path) as z:
             mesh = z.read("face_landmarks_detector.tflite")
+            blend = z.read("face_blendshapes.tflite")
         self.it = Interpreter(model_content=mesh, num_threads=threads)
         self.it.allocate_tensors()
         self.inp = self.it.get_input_details()[0]["index"]
@@ -73,9 +125,15 @@ class _LiteRtMesh:
         self.out_points = next(o["index"] for o in outs if int(np.prod(o["shape"])) == 478 * 3)
         self.out_presence = next(o["index"] for o in outs if o["shape"].tolist() == [1, 1, 1, 1])
 
+        self.blend = Interpreter(model_content=blend, num_threads=1)
+        self.blend.allocate_tensors()
+        self.blend_in = self.blend.get_input_details()[0]["index"]
+        self.blend_out = self.blend.get_output_details()[0]["index"]
+
         self.detector = cv2.FaceDetectorYN.create(str(yunet_path), "", (320, 320), 0.6, 0.3, 5)
         self.det_size = None
         self.prev: np.ndarray | None = None  # last landmarks, for tracking
+        self.frames_tracked = 0
 
     def _detect_roi(self, frame):
         h, w = frame.shape[:2]
@@ -110,14 +168,40 @@ class _LiteRtMesh:
         local = self.it.get_tensor(self.out_points).reshape(478, 3)[:, :2].astype(np.float64)
         return (local @ m[:, :2].T + m[:, 2]).astype(np.float32)
 
+    def _blendshapes(self, pts):
+        self.blend.set_tensor(self.blend_in, pts[BLEND_INPUT][None].astype(np.float32))
+        self.blend.invoke()
+        return self.blend.get_tensor(self.blend_out).reshape(-1).copy()
+
+    def _drifted(self, frame, pts) -> tuple | None:
+        """Every REDETECT_EVERY frames: if the detector's largest face is somewhere
+        else than the tracked one (driver changed, tracking slid onto a passenger),
+        return that face's ROI to switch to it."""
+        self.frames_tracked += 1
+        if self.frames_tracked % REDETECT_EVERY:
+            return None
+        roi = self._detect_roi(frame)
+        if roi is None:
+            return None  # detector miss: trust the mesh's own presence score
+        (cx, cy), size, _ = roi
+        (tx, ty), tsize, _ = self._roi_from_points(pts)
+        far = math.hypot(cx - tx, cy - ty) > 0.5 * max(size, tsize)
+        return roi if far or size > 1.5 * tsize else None
+
     def detect(self, frame_bgr, ts_ms):
+        frame_bgr = enhance_if_dark(frame_bgr)
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         pts = self._mesh(rgb, self._roi_from_points(self.prev)) if self.prev is not None else None
+        if pts is not None:
+            switch = self._drifted(frame_bgr, pts)
+            if switch is not None:
+                pts = self._mesh(rgb, switch)
         if pts is None:
+            self.frames_tracked = 0
             roi = self._detect_roi(frame_bgr)
             pts = self._mesh(rgb, roi) if roi else None
         self.prev = pts
-        return [_face_from_points(pts)] if pts is not None else []
+        return [_face_from_points(pts, self._blendshapes(pts))] if pts is not None else []
 
     def close(self):
         pass
@@ -136,6 +220,7 @@ class _MediaPipeMesh:
                 num_faces=max_faces,
                 min_face_detection_confidence=0.5,
                 min_tracking_confidence=0.5,
+                output_face_blendshapes=True,
             )
         )
         self._last_ts = 0
@@ -143,12 +228,17 @@ class _MediaPipeMesh:
     def detect(self, frame_bgr, ts_ms):
         ts_ms = max(ts_ms, self._last_ts + 1)  # VIDEO mode needs increasing timestamps
         self._last_ts = ts_ms
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(enhance_if_dark(frame_bgr), cv2.COLOR_BGR2RGB)
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect_for_video(image, ts_ms)
         h, w = frame_bgr.shape[:2]
-        return [_face_from_points(np.array([(lm.x * w, lm.y * h) for lm in lms], dtype=np.float32))
-                for lms in result.face_landmarks]
+        faces = []
+        for i, lms in enumerate(result.face_landmarks):
+            pts = np.array([(lm.x * w, lm.y * h) for lm in lms], dtype=np.float32)
+            cats = result.face_blendshapes[i] if result.face_blendshapes else None
+            blend = np.array([c.score for c in cats], np.float32) if cats else None
+            faces.append(_face_from_points(pts, blend))
+        return faces
 
     def close(self):
         self._landmarker.close()

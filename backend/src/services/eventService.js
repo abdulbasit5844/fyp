@@ -1,6 +1,7 @@
 const { SafetyEvent, Device, DriverProfile, VideoClip, User } = require('../models');
 const ws = require('../realtime/wsHub');
 const notify = require('./notificationService');
+const pick = require('../utils/pick');
 
 // Late-bound to avoid a require cycle with the MQTT bridge.
 const bridge = () => require('../realtime/mqttBridge');
@@ -118,7 +119,8 @@ async function edgeAck(device, p) {
 
 async function resolve(device, p) {
   const event = await SafetyEvent.findOne({ edgeEventId: p.eventId, device: device._id });
-  if (!event || event.status === 'resolved') return event;
+  // Only an open alert can clear; acknowledged/escalated ones keep that status.
+  if (!event || event.status !== 'active') return event;
   event.status = 'resolved';
   event.resolvedAt = new Date();
   await event.save();
@@ -148,16 +150,27 @@ async function recordClip(device, p) {
   return clip;
 }
 
+const PROGRESS_FIELDS = ['mode', 'samples', 'needed', 'faceVisible', 'secondsLeft', 'preview'];
+
 async function saveEnrollment(device, p) {
+  // Live progress (with a small camera preview) goes straight to the owner's app.
+  if (p.status === 'progress') {
+    ws.broadcast(device.owner, 'enrollment_progress', { driverId: String(p.driverId), ...pick(p, PROGRESS_FIELDS) });
+    return null;
+  }
   const driver = await DriverProfile.findOne({ _id: p.driverId, owner: device.owner }).select('+faceEmbeddings');
   if (!driver) return null;
   if (p.ok && Array.isArray(p.vector)) {
     driver.faceEmbeddings.push({ vector: p.vector, model: p.model || 'unknown' });
     driver.faceEmbeddings = driver.faceEmbeddings.slice(-5); // keep the 5 most recent samples
+    if (typeof p.photo === 'string' && p.photo) driver.photo = p.photo;
     await driver.save();
     await bridge().publishDriversForOwner(device.owner);
   }
-  ws.broadcast(device.owner, 'enrollment', { driverId: driver.id, ok: Boolean(p.ok), error: p.error });
+  console.log(`[enroll] ${driver.displayName}: ${p.ok ? 'face enrolled' : `failed (${p.error})`}`);
+  ws.broadcast(device.owner, 'enrollment', {
+    driverId: driver.id, ok: Boolean(p.ok), error: p.error, ...(p.ok && { photo: driver.photo }),
+  });
   return driver;
 }
 

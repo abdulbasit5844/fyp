@@ -1,6 +1,7 @@
 const fs = require('fs');
 const config = require('../config');
 const { User, EmergencyContact, AlertLog, SystemConfig } = require('../models');
+const whatsapp = require('./whatsappService');
 
 // --- Providers (both optional; missing credentials are logged, not fatal) ---
 
@@ -80,16 +81,15 @@ async function sendEmail(to, { subject, text, html }) {
   return { ok: true, id: info.messageId };
 }
 
-function escalationEmail(event, ownerName, link) {
+function escalationEmail(event, ownerName) {
   const label = LABELS[event.eventType];
   const time = (event.escalatedAt || event.detectedAt || new Date()).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
   const rows = [
     ['Driver', ownerName],
     ['Alert', `${event.severity.toUpperCase()}: ${label}`],
     ['Time', time],
-    ['Location', link ? `<a href="${link}">Open in Google Maps</a>` : 'Unavailable'],
   ].map(([k, v], i) => `<tr${i % 2 ? '' : ' style="background:#f6f6f6"'}><td style="padding:10px;border:1px solid #ddd;font-weight:bold">${k}</td>`
-    + `<td style="padding:10px;border:1px solid #ddd">${k === 'Location' ? v : escapeHtml(v)}</td></tr>`).join('');
+    + `<td style="padding:10px;border:1px solid #ddd">${escapeHtml(v)}</td></tr>`).join('');
   return {
     subject: `EMERGENCY: ${ownerName} is not responding`,
     html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
@@ -101,6 +101,16 @@ function escalationEmail(event, ownerName, link) {
   </div>
 </div>`,
   };
+}
+
+function escalationWhatsApp(event, ownerName) {
+  const time = (event.escalatedAt || event.detectedAt || new Date())
+    .toLocaleTimeString('en-PK', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit' });
+  return [
+    `🚨 *EMERGENCY ALERT*`,
+    `${ownerName} is not responding to a ${LABELS[event.eventType].toLowerCase()} alert (${event.severity}) at ${time}.`,
+    'Please check on them now. (Driver Monitoring System)',
+  ].join('\n');
 }
 
 // --- Delivery with retry and an AlertLog row per attempt (REL-3) ---
@@ -134,11 +144,6 @@ const LABELS = {
   key_left_inside: 'Key left inside vehicle',
 };
 
-const mapsLink = (event) => {
-  const c = event.location?.coordinates;
-  return c ? `https://maps.google.com/?q=${c[1]},${c[0]}` : null;
-};
-
 // Owner + family members get every alert on their phones (FR6.1).
 async function notifyOwnerAlert(event) {
   const cfg = await SystemConfig.findOne({ owner: event.owner });
@@ -166,24 +171,25 @@ async function notifyEscalation(event, ownerName) {
     EmergencyContact.find({ owner: event.owner }).sort({ priority: 1 }).populate({ path: 'linkedUser', select: '+fcmTokens' }),
     SystemConfig.findOne({ owner: event.owner }),
   ]);
-  const link = mapsLink(event);
   const text = `EMERGENCY: ${ownerName} is not responding to a ${LABELS[event.eventType].toLowerCase()} alert.`
-    + (link ? ` Location: ${link}` : ' Location unavailable.');
+    + ' Please check on them now.';
 
-  const email = escalationEmail(event, ownerName, link);
+  const email = escalationEmail(event, ownerName);
+  const whatsappOn = cfg?.notifications?.whatsapp !== false;
+  const waText = escalationWhatsApp(event, ownerName);
 
   const pushOrSms = (c, base) => {
     if (c.linkedUser?.fcmTokens?.length) {
       return deliver(new AlertLog({ ...base, channel: 'push', recipientUser: c.linkedUser._id }), () => sendPush(c.linkedUser.fcmTokens, {
         title: 'Emergency alert',
         body: text,
-        data: { kind: 'escalation', eventId: event.id, mapsUrl: link || '' },
+        data: { kind: 'escalation', eventId: event.id },
       }));
     }
     if (c.notifyBySms && cfg?.notifications.smsFallback) {
       return deliver(new AlertLog({ ...base, channel: 'sms' }), () => sendSms(c.phone, text));
     }
-    if (c.email) return null; // email below is this contact's only channel
+    if (c.email || whatsappOn) return null; // email / WhatsApp reach this contact instead
     return deliver(new AlertLog({ ...base, channel: 'sms' }), async () => ({
       ok: false,
       error: 'Contact has no app, no email and SMS fallback is off',
@@ -192,11 +198,14 @@ async function notifyEscalation(event, ownerName) {
 
   const jobs = contacts.flatMap((c) => {
     const base = { event: event._id, owner: event.owner, alertType: 'escalation', recipientContact: c._id };
-    // Email goes out alongside push/SMS: it needs no app or SMS credit on the contact's side.
+    // Email and WhatsApp go out alongside push/SMS: they need no app or SMS credit on the contact's side.
     const byEmail = c.email
       ? deliver(new AlertLog({ ...base, channel: 'email' }), () => sendEmail(c.email, { ...email, text }))
       : null;
-    return [byEmail, pushOrSms(c, base)].filter(Boolean);
+    const byWhatsApp = whatsappOn
+      ? deliver(new AlertLog({ ...base, channel: 'whatsapp' }), () => whatsapp.sendText(c.phone, waText))
+      : null;
+    return [byEmail, byWhatsApp, pushOrSms(c, base)].filter(Boolean);
   });
 
   // The owner's own phones also show the escalation.

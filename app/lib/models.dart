@@ -24,6 +24,7 @@ class Device {
         name = j['name'] ?? 'My Vehicle',
         online = j['online'] ?? false,
         monitoring = j['monitoring'] ?? false,
+        detectionEnabled = j['detectionEnabled'] ?? false,
         state = driverStateFrom(j['currentState']),
         lastSeenAt = _date(j['lastSeenAt']),
         stateUpdatedAt = _date(j['stateUpdatedAt']),
@@ -31,6 +32,7 @@ class Device {
 
   final String id, deviceId, name;
   final bool online, monitoring;
+  final bool detectionEnabled; // Start/Stop detecting from the home screen
   final DriverState state;
   final DateTime? lastSeenAt, stateUpdatedAt;
   final String? activeDriverName;
@@ -125,10 +127,48 @@ class DriverProfile {
         displayName = j['displayName'],
         isPrimary = j['isPrimary'] ?? false,
         isAuthorized = j['isAuthorized'] ?? true,
-        enrolled = j['enrolled'] ?? false;
+        enrolled = j['enrolled'] ?? false,
+        photo = j['photo'];
 
   final String id, displayName;
   final bool isPrimary, isAuthorized, enrolled;
+  final String? photo; // base64 JPEG taken at enrollment
+}
+
+/// A face-enrollment message from the vehicle unit: the live camera view
+/// (and capture progress), then a final result (`done` true).
+class EnrollmentUpdate {
+  EnrollmentUpdate.progress(Map<String, dynamic> j)
+      : driverId = j['driverId'],
+        done = false,
+        ok = false,
+        error = null,
+        photo = null,
+        capturing = j['mode'] == 'capture',
+        samples = (j['samples'] as num?)?.toInt() ?? 0,
+        needed = (j['needed'] as num?)?.toInt() ?? 5,
+        faceVisible = j['faceVisible'] ?? false,
+        secondsLeft = (j['secondsLeft'] as num?)?.toInt(),
+        preview = j['preview'];
+
+  EnrollmentUpdate.result(Map<String, dynamic> j)
+      : driverId = j['driverId'],
+        done = true,
+        ok = j['ok'] ?? false,
+        error = j['error'],
+        photo = j['photo'],
+        capturing = false,
+        samples = 0,
+        needed = 0,
+        faceVisible = false,
+        secondsLeft = null,
+        preview = null;
+
+  final String driverId;
+  final bool done, ok, faceVisible, capturing;
+  final String? error, preview, photo;
+  final int samples, needed;
+  final int? secondsLeft;
 }
 
 /// Mutable copy of SystemConfig for the settings screen.
@@ -144,11 +184,12 @@ class MonitorSettings {
         videoRecordingEnabled = j['videoRecordingEnabled'] ?? true,
         push = j['notifications']?['push'] ?? true,
         sound = j['notifications']?['sound'] ?? true,
-        smsFallback = j['notifications']?['smsFallback'] ?? false;
+        smsFallback = j['notifications']?['smsFallback'] ?? false,
+        whatsapp = j['notifications']?['whatsapp'] ?? true;
 
   double earThreshold, earSustainSec, headPoseThresholdDeg, headPoseSustainSec;
   double emotionSustainSec, ackWindowSec, alertSensitivity;
-  bool videoRecordingEnabled, push, sound, smsFallback;
+  bool videoRecordingEnabled, push, sound, smsFallback, whatsapp;
 
   Map<String, dynamic> toJson() => {
         'earThreshold': double.parse(earThreshold.toStringAsFixed(2)),
@@ -159,6 +200,6 @@ class MonitorSettings {
         'ackWindowSec': ackWindowSec.roundToDouble(),
         'alertSensitivity': alertSensitivity.round(),
         'videoRecordingEnabled': videoRecordingEnabled,
-        'notifications': {'push': push, 'sound': sound, 'smsFallback': smsFallback},
+        'notifications': {'push': push, 'sound': sound, 'smsFallback': smsFallback, 'whatsapp': whatsapp},
       };
 }

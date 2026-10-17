@@ -177,3 +177,63 @@ def test_recorder_writes_pre_and_post_frames(tmp_path):
     assert clips and clips[0]["eventId"] == "evt1" and clips[0]["status"] == "available"
     assert 2.8 <= clips[0]["durationSec"] <= 3.2
     assert (tmp_path / "evt1.mp4").stat().st_size > 0
+
+
+# --- back to normal: the open alert closes, even when critical ---
+
+def test_recovered_driver_closes_critical_alert_and_cancels_escalation():
+    from dms_edge import pipeline as pl
+    from dms_edge.fusion import FusionResult, Signals, Trigger
+
+    clock = [0.0]
+    escalated, resolved = [], []
+    p = object.__new__(pl.Pipeline)
+    p.alerts = AlertManager(MonitorConfig(ackWindowSec=10), lambda e: None, escalated.append,
+                            clock=lambda: clock[0], hardware=False)
+    p.open_events, p.state = {}, "safe"
+    p._raise_event = lambda type_, sev, *a, **k: (p.alerts.raise_alert("e1", type_, sev), "e1")[1]
+    p._resolve_event = lambda eid: (p.alerts.resolve(eid), resolved.append(eid))
+    results = iter([
+        FusionResult("critical", raised=[Trigger("drowsiness", "critical", 2000, "eyes closed")]),
+        FusionResult("safe", cleared=["drowsiness"]),
+    ])
+    p.fusion = type("F", (), {"update": lambda self, s, now: next(results)})()
+
+    p._apply_fusion(Signals(True), 0)
+    assert p.state == "critical" and p.alerts.is_open("e1")
+    clock[0] = 3.0
+    p._apply_fusion(Signals(True), 3.0)  # eyes open again
+    assert p.state == "safe" and resolved == ["e1"]
+    clock[0] = 20.0
+    p.alerts.tick()
+    assert escalated == []  # no escalation after recovery
+
+
+# --- Start / Stop detecting from the app ---
+
+def test_stop_detecting_closes_open_alerts_and_resets():
+    from dms_edge import pipeline as pl
+    from dms_edge.fusion import Fusion
+
+    escalated, resolved, statuses = [], [], []
+    p = object.__new__(pl.Pipeline)
+    p.lock = __import__("threading").Lock()
+    p.verify_enabled, p.detecting = True, False
+    p.alerts = AlertManager(MonitorConfig(ackWindowSec=10), lambda e: None, escalated.append,
+                            clock=lambda: 0.0, hardware=False)
+    p.fusion = Fusion(MonitorConfig())
+    p._resolve_event = lambda eid: (p.alerts.resolve(eid), resolved.append(eid))
+    p._publish_status = lambda now, force=False: statuses.append(p.detecting)
+    p.baseline, p.smooth, p.emotion_avg, p.last_emotion = pl.DriverBaseline(), {}, None, (None, None)
+
+    p._on_detection({"enabled": True})
+    assert p.detecting and statuses == [True]
+    p.verified, p.state = True, "critical"
+    p.alerts.raise_alert("e1", "drowsiness", "critical")
+    p.open_events = {"drowsiness": ("e1", "critical")}
+
+    p._on_detection({"enabled": False})
+    assert not p.detecting and p.state == "safe" and resolved == ["e1"]
+    assert not p.alerts.is_open("e1") and p.open_events == {} and p.verified is False
+    p._on_detection({"enabled": False})  # repeated (retained) message: no-op
+    assert statuses == [True, False]

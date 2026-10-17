@@ -20,6 +20,11 @@ const config = {
     authToken: process.env.TWILIO_AUTH_TOKEN,
     from: process.env.TWILIO_FROM,
   },
+  // WhatsApp via a linked account (QR code in the app). Off in tests.
+  whatsapp: {
+    enabled: process.env.WHATSAPP !== 'off' && env !== 'test',
+    authDir: process.env.WHATSAPP_AUTH_DIR || require('path').join(__dirname, '..', '..', 'whatsapp-auth'),
+  },
   // Gmail by default; EMAIL_PASS is a Google app password, not the account password.
   email: {
     user: process.env.EMAIL_USER,

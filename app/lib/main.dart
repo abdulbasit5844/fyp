@@ -70,10 +70,8 @@ class _RootState extends State<_Root> {
     _alerts = live.newAlerts.listen((event) async {
       if (_showing == event.id) return;
       _showing = event.id;
-      await navigatorKey.currentState?.push(MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => AlertScreen(event: event),
-      ));
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) await showAlertPopup(ctx, event);
       _showing = null;
     });
   }
