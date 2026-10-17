@@ -32,6 +32,10 @@ Color stateColor(DriverState s) => switch (s) {
 
 Color severityColor(String severity) => severity == 'critical' ? criticalColor : warningColor;
 
+/// The same colour, lightened in dark mode so text and icons stay readable.
+Color readable(BuildContext context, Color c) =>
+    Theme.of(context).brightness == Brightness.dark ? Color.lerp(c, Colors.white, 0.35)! : c;
+
 /// Icon for each event type (UI-4: text + icon on every alert).
 IconData eventIcon(String type) => switch (type) {
       'drowsiness' => Icons.bedtime,

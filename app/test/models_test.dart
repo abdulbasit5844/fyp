@@ -38,7 +38,8 @@ void main() {
     final j = s.toJson();
     expect(j['earThreshold'], 0.23);
     expect(j['alertSensitivity'], 4);
-    expect(j['notifications'], {'push': true, 'sound': false, 'smsFallback': true});
+    // WhatsApp alerts default to on when the server has not stored the flag yet.
+    expect(j['notifications'], {'push': true, 'sound': false, 'smsFallback': true, 'whatsapp': true});
   });
 
   test('Device state defaults to safe for unknown values', () {

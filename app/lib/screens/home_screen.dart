@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models.dart';
 import '../state/auth_state.dart';
 import '../state/live_state.dart';
+import '../state/theme_state.dart';
 import '../theme.dart';
 import 'alert_screen.dart';
 import 'contacts_screen.dart';
@@ -21,6 +22,8 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final live = context.watch<LiveState>();
     final auth = context.read<AuthState>();
+    final theme = context.watch<ThemeState>();
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -34,12 +37,31 @@ class HomeScreen extends StatelessWidget {
                   color: live.connected ? safeColor : Theme.of(context).colorScheme.error),
             ),
           ),
+          IconButton(
+            tooltip: dark ? 'Switch to light mode' : 'Switch to dark mode',
+            icon: Icon(dark ? Icons.light_mode : Icons.dark_mode),
+            onPressed: () => theme.toggle(Theme.of(context).brightness),
+          ),
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'logout') auth.logout();
+              final mode = ThemeMode.values.where((m) => 'theme:${m.name}' == v);
+              if (mode.isNotEmpty) theme.set(mode.first);
             },
             itemBuilder: (_) => [
               PopupMenuItem(enabled: false, child: Text('${auth.user?.name} (${auth.user?.role})')),
+              const PopupMenuDivider(),
+              for (final (m, label, icon) in [
+                (ThemeMode.system, 'Theme: follow system', Icons.brightness_auto),
+                (ThemeMode.light, 'Theme: light', Icons.light_mode),
+                (ThemeMode.dark, 'Theme: dark', Icons.dark_mode),
+              ])
+                CheckedPopupMenuItem(value: 'theme:${m.name}', checked: theme.mode == m, child: Row(children: [
+                  Icon(icon, size: 20),
+                  const SizedBox(width: 12),
+                  Text(label),
+                ])),
+              const PopupMenuDivider(),
               const PopupMenuItem(value: 'logout', child: Text('Sign out')),
             ],
           ),
@@ -128,10 +150,10 @@ class _StatusCardState extends State<_StatusCard> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(icon, size: 72, color: color),
+            Icon(icon, size: 72, color: readable(context, color)),
             const SizedBox(height: 8),
             Text(label,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(color: color, fontWeight: FontWeight.bold)),
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(color: readable(context, color), fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(subtitle, textAlign: TextAlign.center),
             if (device != null) ...[

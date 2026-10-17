@@ -12,6 +12,7 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'state/auth_state.dart';
 import 'state/live_state.dart';
+import 'state/theme_state.dart';
 import 'theme.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -29,6 +30,7 @@ void main() {
       Provider.value(value: api),
       ChangeNotifierProvider.value(value: auth),
       ChangeNotifierProvider(create: (_) => LiveState(api)),
+      ChangeNotifierProvider(create: (_) => ThemeState()..load()),
     ],
     child: const DmsApp(),
   ));
@@ -45,6 +47,7 @@ class DmsApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
+      themeMode: context.watch<ThemeState>().mode,
       home: const _Root(),
     );
   }
