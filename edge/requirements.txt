@@ -1,6 +1,9 @@
 # On the Pi, numpy / opencv / picamera2 / paho / serial / gpiozero come from apt
 # (see deploy/pi-setup.sh) and the venv is created with --system-site-packages.
-mediapipe>=1.1
+mediapipe>=1.1; platform_machine != "aarch64"
+# Pi 4: MediaPipe 1.x needs ARMv8 AES (missing on the Cortex-A72); the same face
+# mesh model runs on LiteRT instead (see dms_edge/landmarks.py).
+ai-edge-litert>=1.2; platform_machine == "aarch64"
 onnxruntime>=1.20
 paho-mqtt>=2.0
 pyserial>=3.5

@@ -20,7 +20,9 @@ if [[ ! -x edge/.venv/bin/python ]]; then
   # System site-packages gives the venv apt's OpenCV, NumPy, picamera2 and gpiozero.
   python3 -m venv --system-site-packages edge/.venv
 fi
-edge/.venv/bin/pip install --quiet --disable-pip-version-check mediapipe onnxruntime
+# MediaPipe 1.x crashes on the Pi 4 (needs ARMv8 AES); its face mesh model runs on LiteRT instead.
+edge/.venv/bin/pip uninstall --quiet --yes mediapipe 2>/dev/null || true
+edge/.venv/bin/pip install --quiet --disable-pip-version-check ai-edge-litert onnxruntime
 edge/.venv/bin/python edge/scripts/download_models.py
 
 echo "==> user services"

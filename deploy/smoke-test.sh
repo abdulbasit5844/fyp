@@ -15,7 +15,7 @@ check "mongod running"      "systemctl is-active --quiet mongod"
 check "mosquitto running"   "systemctl is-active --quiet mosquitto"
 check "dms-backend running" "systemctl --user is-active --quiet dms-backend"
 check "dms-edge running"    "systemctl --user is-active --quiet dms-edge"
-check "MongoDB answers"     "/opt/mongodb/bin/mongod --version"
+check "MongoDB answers"     "LD_LIBRARY_PATH=/opt/mongodb/lib /opt/mongodb/bin/mongod --version"
 
 echo "== API"
 for i in $(seq 1 20); do curl -sf $API/health >/dev/null && break; sleep 1; done
@@ -27,6 +27,9 @@ reg=$(curl -s -X POST $API/auth/register -H 'Content-Type: application/json' \
 token=$(echo "$reg" | json 'o.accessToken||""')
 [[ -n "$token" ]] && ok "register + JWT" || { bad "register ($reg)"; exit 1; }
 H=(-H "Authorization: Bearer $token" -H 'Content-Type: application/json')
+# Unpair the device on exit, so the real owner (and the next smoke run) can pair it.
+devid=""
+trap '[[ -n "$devid" ]] && curl -s "${H[@]}" -X DELETE "$API/devices/$devid" >/dev/null' EXIT
 
 curl -sf "${H[@]}" -X POST $API/contacts -d '{"name":"Test","phone":"+923001234567"}' >/dev/null \
   && ok "add emergency contact" || bad "add emergency contact"
@@ -38,6 +41,7 @@ done
 curl -s "${H[@]}" $API/devices/discover | grep -q "$DEV" && ok "edge pipeline seen on MQTT" || bad "edge pipeline not seen on MQTT"
 curl -s "${H[@]}" -X POST $API/devices -d "{\"deviceId\":\"$DEV\",\"name\":\"Smoke test car\"}" >/dev/null
 sleep 3
+devid=$(curl -s "${H[@]}" $API/devices | json 'o[0]?o[0].id:""')
 state=$(curl -s "${H[@]}" $API/devices | json 'o[0]&&o[0].online')
 [[ "$state" == "true" ]] && ok "device paired and online" || bad "device online ($state)"
 
@@ -52,9 +56,9 @@ wait
 grep -q "$eid" /tmp/ack.txt && ok "ack delivered back to edge over MQTT" || bad "ack not received on MQTT"
 
 echo "== camera / AI"
-journalctl --user -u dms-edge --since "-5 min" --no-pager | grep -qE "camera opened" \
-  && ok "camera opened by pipeline" || bad "camera not opened (check: journalctl --user -u dms-edge)"
-journalctl --user -u dms-edge --since "-5 min" --no-pager | grep -E "perf:" | tail -1
+journalctl --user-unit dms-edge --since "-5 min" --no-pager | grep -E "camera opened" >/dev/null \
+  && ok "camera opened by pipeline" || bad "camera not opened (check: journalctl --user-unit dms-edge)"
+journalctl --user-unit dms-edge --since "-5 min" --no-pager | grep -E "perf:" | tail -1
 
 echo; echo "RESULT: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

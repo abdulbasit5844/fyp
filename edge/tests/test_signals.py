@@ -100,3 +100,18 @@ def test_best_match():
 
     assert best_match(unit(b + 0.1 * rng.normal(size=128)), drivers, 0.363).authorized is False
     assert best_match(unit(rng.normal(size=128)), drivers, 0.363).driver_id is None
+
+
+# --- landmark crop: crop pixels map back onto the rotated face square ---
+
+def test_roi_transform_maps_crop_to_rotated_square():
+    from dms_edge.landmarks import MESH_SIZE, ROI_SCALE, roi_transform
+
+    m = roi_transform((300.0, 200.0), 100.0, np.radians(30))
+    to_img = lambda u: m[:, :2] @ np.asarray(u, float) + m[:, 2]
+    half = MESH_SIZE / 2
+    assert to_img((half, half)) == pytest.approx((300.0, 200.0))
+    # Moving right across the crop moves along the eye line (30° down-right in image coords).
+    step = to_img((half + 10, half)) - to_img((half, half))
+    assert np.degrees(np.arctan2(step[1], step[0])) == pytest.approx(30.0)
+    assert np.linalg.norm(step) == pytest.approx(10 * 100.0 * ROI_SCALE / MESH_SIZE)

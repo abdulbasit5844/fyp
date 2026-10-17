@@ -27,7 +27,7 @@ camera ─► edge pipeline (Python) ──MQTT 127.0.0.1:1883──► backend 
 3. Then `bash deploy/deploy.sh` again. It installs dependencies, downloads models, creates
    `backend/.env` with a random JWT secret, and starts `dms-backend` and `dms-edge`.
 
-Logs: `journalctl --user -u dms-backend -f` and `journalctl --user -u dms-edge -f` on the Pi.
+Logs: `journalctl --user-unit dms-backend -f` and `journalctl --user-unit dms-edge -f` on the Pi.
 
 ## Wiring (BCM pin numbers, change in `deploy/systemd/dms-edge.service` via `DMS_*_PIN`)
 
@@ -74,6 +74,9 @@ the pipeline prefers it automatically.
 * **Push notifications (FCM)**: create a Firebase project, download a service-account JSON to the Pi and
   set `FIREBASE_SERVICE_ACCOUNT=/path/to/file.json` in `backend/.env`.
 * **SMS fallback (Twilio)**: set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`.
+* **Email escalation (free)**: set `EMAIL_USER` (a Gmail address) and `EMAIL_PASS` (a Google app password) in
+  `backend/.env`. Every emergency contact with an email address gets an SOS email with the Maps link,
+  alongside push/SMS.
 * **HTTPS (SEC-1)**: set `TLS_CERT` / `TLS_KEY` and use `https://` in the app.
 
 Without these, escalations are still logged and shown in the app; delivery is recorded as failed with the reason.

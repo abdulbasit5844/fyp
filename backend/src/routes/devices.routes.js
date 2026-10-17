@@ -1,0 +1,14 @@
+const express = require('express');
+const { requireRole } = require('../middleware/auth');
+const devices = require('../controllers/devices.controller');
+
+const router = express.Router();
+
+router.get('/', devices.list);
+router.get('/discover', requireRole('owner'), devices.discover);
+router.post('/', requireRole('owner'), devices.pair);
+router.get('/:id', devices.get);
+router.patch('/:id', requireRole('owner'), devices.update);
+router.delete('/:id', requireRole('owner'), devices.unpair);
+
+module.exports = router;

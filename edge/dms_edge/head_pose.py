@@ -48,7 +48,13 @@ def rotation_to_euler(rvec: np.ndarray) -> tuple[float, float, float]:
 
 def estimate(points: np.ndarray, width: int, height: int) -> tuple[float, float, float] | None:
     image_points = points[list(LANDMARK_IDS)].astype(np.float64)
+    # Start from "facing the camera" at a plausible distance; without a guess the
+    # iterative solver can settle on a mirrored pose (roll near ±180°).
+    eye_px = max(np.linalg.norm(image_points[2] - image_points[3]), 1.0)
+    rvec0 = np.array([[np.pi], [0.0], [0.0]])
+    tvec0 = np.array([[0.0], [0.0], [width * (MODEL_POINTS[3, 0] - MODEL_POINTS[2, 0]) / eye_px]])
     ok, rvec, _ = cv2.solvePnP(
-        MODEL_POINTS, image_points, camera_matrix(width, height), np.zeros(4), flags=cv2.SOLVEPNP_ITERATIVE
+        MODEL_POINTS, image_points, camera_matrix(width, height), np.zeros(4),
+        rvec0, tvec0, True, cv2.SOLVEPNP_ITERATIVE,
     )
     return rotation_to_euler(rvec) if ok else None
