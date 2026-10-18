@@ -21,6 +21,8 @@ class LiveState extends ChangeNotifier {
   List<SafetyEvent> activeAlerts = [];
   SafetyEvent? lastEvent;
   final Set<String> escalatedIds = {};
+  /// Delivery results of escalations, by event id (e.g. the owner's WhatsApp for an unknown driver).
+  final Map<String, List<AlertDelivery>> deliveries = {};
   bool connected = false;
   int ackWindowSec = 15;
 
@@ -137,6 +139,9 @@ class LiveState extends ChangeNotifier {
           escalatedIds.add(e.id);
           _alertController.add(e);
         }
+      case 'escalation_delivery':
+        deliveries[data['eventId'] as String] =
+            [for (final n in (data['notifications'] as List)) AlertDelivery.fromJson(n as Map<String, dynamic>)];
       case 'config':
         ackWindowSec = (data['ackWindowSec'] as num).round();
       case 'enrollment_progress':

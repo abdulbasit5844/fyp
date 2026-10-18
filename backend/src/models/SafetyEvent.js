@@ -51,6 +51,8 @@ const safetyEventSchema = new mongoose.Schema(
     status: { type: String, enum: EVENT_STATUSES, default: 'active' },
     description: { type: String, maxlength: 200 },
     signals: signalsSchema,
+    // unverified_driver: base64 JPEG of the person in the driver's seat. Only loaded for one event.
+    photo: { type: String, select: false, maxlength: 400000 },
     location: pointSchema,
 
     detectedAt: { type: Date, required: true },
@@ -73,7 +75,9 @@ safetyEventSchema.virtual('escalated').get(function escalated() {
 });
 // "Action taken" column in the event log, FR7.1.
 safetyEventSchema.virtual('actionTaken').get(function actionTaken() {
-  if (this.escalatedAt) return 'Emergency contacts notified';
+  if (this.escalatedAt) {
+    return this.eventType === 'unverified_driver' ? 'Owner alerted on WhatsApp' : 'Emergency contacts notified';
+  }
   if (this.acknowledgedAt) return 'Acknowledged by driver';
   return 'Alert raised';
 });

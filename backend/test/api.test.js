@@ -276,6 +276,40 @@ test('edge flow: pair, status, event, ack, escalation, clip', async () => {
   assert.equal(r.status, 403);
 });
 
+test('unknown driver: photo to the app, then WhatsApp with the photo to the owner only', async () => {
+  const { token } = state;
+  const waSent = [];
+  whatsapp.setTestSender(async (phone, text, image) => { waSent.push({ phone, text, image }); return { ok: true, id: 'wa-2' }; });
+  let r = await api('PATCH', '/api/config', { token, body: { ownerWhatsApp: '12345' } });
+  assert.equal(r.status, 400);
+  r = await api('PATCH', '/api/config', { token, body: { ownerWhatsApp: '+923001112233' } });
+  assert.equal(r.body.ownerWhatsApp, '+923001112233');
+
+  await edge('pi-test', 'status', { online: true, state: 'safe', monitoring: false, identity: 'unknown' });
+  r = await api('GET', '/api/devices', { token });
+  assert.equal(r.body[0].identity, 'unknown');
+  assert.equal(r.body[0].monitoring, false);
+
+  const photo = Buffer.from('fake-jpeg').toString('base64');
+  await edge('pi-test', 'event', {
+    eventId: 'u1', type: 'unverified_driver', severity: 'critical', detectedAt: new Date().toISOString(),
+    description: "Unknown person in the driver's seat (best match 0.05)", photo,
+  });
+  await new Promise((res) => setTimeout(res, 300)); // let the WhatsApp delivery finish
+  r = await api('GET', '/api/events?type=unverified_driver', { token });
+  const u1 = r.body.items[0];
+  assert.equal(u1.status, 'escalated', 'no acknowledgment window for an unknown driver');
+  assert.equal(u1.actionTaken, 'Owner alerted on WhatsApp');
+  assert.equal(u1.photo, undefined, 'photos stay out of the event list');
+  r = await api('GET', `/api/events/${u1.id}`, { token });
+  assert.equal(r.body.photo, photo);
+  assert.deepEqual(waSent.map((m) => m.phone), ['+923001112233'], 'the owner only, not the emergency contacts');
+  assert.equal(waSent[0].image.toString(), 'fake-jpeg');
+  assert.match(waSent[0].text, /UNKNOWN DRIVER/);
+  assert.equal(r.body.notifications.find((n) => n.channel === 'whatsapp').deliveryStatus, 'sent');
+  whatsapp.setTestSender(null);
+});
+
 test('face enrollment: request, live progress, result', async () => {
   const { token } = state;
   const sent = [];
@@ -330,7 +364,7 @@ test('family members see owner data but cannot change settings', async () => {
   assert.equal(r.status, 201);
   r = await api('POST', '/api/auth/login', { body: { email: 'sis@x.com', password: 'password123' } });
   const token = r.body.accessToken;
-  assert.equal((await api('GET', '/api/events', { token })).body.total, 5);
+  assert.equal((await api('GET', '/api/events', { token })).body.total, 6); // incl. the unknown-driver event
   assert.equal((await api('PATCH', '/api/config', { token, body: { earThreshold: 0.2 } })).status, 403);
 });
 

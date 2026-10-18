@@ -26,6 +26,7 @@ async function updateDeviceStatus(device, s) {
     device.currentState = s.state;
   }
   if (typeof s.monitoring === 'boolean') device.monitoring = s.monitoring;
+  if (['verifying', 'verified', 'unknown', 'none'].includes(s.identity)) device.identity = s.identity;
   if (s.driverId !== undefined) {
     device.activeDriver = s.driverId && (await DriverProfile.exists({ _id: s.driverId, owner: device.owner }))
       ? s.driverId
@@ -39,6 +40,8 @@ async function updateDeviceStatus(device, s) {
     device.currentState = 'safe';
   }
   await device.save();
+  // The app shows the driver's name, so send it, not just the id.
+  await device.populate({ path: 'activeDriver', select: 'displayName' });
   ws.broadcast(device.owner, 'device', device.toJSON());
   return device;
 }
@@ -58,14 +61,31 @@ async function ingestEvent(device, p) {
     severity: p.severity,
     description: p.description,
     signals: p.signals,
+    ...(typeof p.photo === 'string' && p.photo && { photo: p.photo }),
     location: toPoint(p.location),
     detectedAt: p.detectedAt ? new Date(p.detectedAt) : new Date(),
     status: 'active',
   });
 
+  // The app gets the alert (with the photo) first; the owner's WhatsApp follows.
   ws.broadcast(device.owner, 'event', event.toJSON());
   background(notify.notifyOwnerAlert(event), 'owner alert');
+  if (event.eventType === 'unverified_driver') {
+    background(alertOwnerUnknownDriver(device, event), 'unknown driver');
+  }
   return event;
+}
+
+// Someone the unit does not recognise is in the driver's seat: escalate at once,
+// to the owner only, by WhatsApp with the photo (no acknowledgment window).
+async function alertOwnerUnknownDriver(device, event) {
+  const updated = await transition(event._id, 'active', { status: 'escalated', escalatedAt: new Date() });
+  if (!updated) return;
+  ws.broadcast(updated.owner, 'escalation', updated.toJSON());
+  const logs = await notify.notifyUnknownDriver(updated, event.photo, device);
+  ws.broadcast(updated.owner, 'escalation_delivery', {
+    eventId: updated.id, notifications: logs.map((l) => l.toJSON()),
+  });
 }
 
 // Atomic status change so an acknowledgment and an escalation that arrive

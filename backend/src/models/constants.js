@@ -11,7 +11,7 @@ const EVENT_TYPES = [
   'inattention', // FR1.4 head pose deviation (yaw, looking up, roll)
   'looking_down', // sustained downward pitch: phone or lap
   'emotional_distress', // FR1.3 angry / fear sustained
-  'unverified_driver', // face embedding did not match a known driver
+  'unverified_driver', // nobody authorized recognised: photo to the app, WhatsApp to the owner
   'unauthorized_occupant', // FR4.1
   'key_left_inside', // FR4.2
 ];

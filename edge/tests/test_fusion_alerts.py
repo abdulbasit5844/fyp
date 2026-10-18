@@ -222,7 +222,7 @@ def test_stop_detecting_closes_open_alerts_and_resets():
     escalated, resolved, statuses = [], [], []
     p = object.__new__(pl.Pipeline)
     p.lock = __import__("threading").Lock()
-    p.verify_enabled, p.detecting = True, False
+    p.verify_enabled, p.detecting, p.unknown_event = True, False, None
     p.alerts = AlertManager(MonitorConfig(ackWindowSec=10), lambda e: None, escalated.append,
                             clock=lambda: 0.0, hardware=False)
     p.fusion = Fusion(MonitorConfig())

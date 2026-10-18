@@ -119,7 +119,20 @@ async function sendText(phone, text) {
   return { ok: true, id: msg?.key?.id };
 }
 
+// A JPEG with a caption (the unknown-driver photo).
+async function sendImage(phone, jpeg, caption) {
+  if (testSender) return testSender(phone, caption, jpeg);
+  if (state.status !== 'connected' || !sock) {
+    return { ok: false, error: 'WhatsApp not configured: link it in Settings → WhatsApp alerts' };
+  }
+  const digits = String(phone).replace(/\D/g, '');
+  const [found] = (await sock.onWhatsApp(digits)) || [];
+  if (!found?.exists) return { ok: false, error: `${phone} is not on WhatsApp` };
+  const msg = await sock.sendMessage(found.jid, { image: jpeg, caption, mimetype: 'image/jpeg' });
+  return { ok: true, id: msg?.key?.id };
+}
+
 // Tests replace the sender so nothing leaves the machine.
 function setTestSender(fn) { testSender = fn; }
 
-module.exports = { init, link, unlink, getStatus, sendText, setTestSender };
+module.exports = { init, link, unlink, getStatus, sendText, sendImage, setTestSender };

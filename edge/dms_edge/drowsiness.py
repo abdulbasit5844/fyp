@@ -180,7 +180,8 @@ class FatigueMonitor:
         """Blinks per minute over the PERCLOS window."""
         if self.total_time < PERCLOS_MIN_COVERAGE:
             return None
-        n = sum(1 for t, _ in self.blinks if self.last_t - t <= PERCLOS_WINDOW_SEC)
+        latest = self.samples[-1][0]  # not last_t: that is cleared while the face is out of view
+        n = sum(1 for t, _ in self.blinks if latest - t <= PERCLOS_WINDOW_SEC)
         return 60.0 * n / self.total_time
 
     @property

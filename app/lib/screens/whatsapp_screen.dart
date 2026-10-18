@@ -24,6 +24,8 @@ class _WhatsAppScreenState extends State<WhatsAppScreen> {
   bool _busy = false;
   Timer? _poll;
   final _phone = TextEditingController(text: '+92');
+  final _ownerPhone = TextEditingController();
+  bool _ownerLoaded = false;
 
   ApiClient get _api => context.read<ApiClient>();
   String get _state => _status?['status'] ?? 'disconnected';
@@ -32,6 +34,7 @@ class _WhatsAppScreenState extends State<WhatsAppScreen> {
   void initState() {
     super.initState();
     _refresh();
+    _loadOwnerNumber();
     // Poll while open: the QR code changes every ~20 s and we must notice the scan.
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
   }
@@ -40,6 +43,7 @@ class _WhatsAppScreenState extends State<WhatsAppScreen> {
   void dispose() {
     _poll?.cancel();
     _phone.dispose();
+    _ownerPhone.dispose();
     super.dispose();
   }
 
@@ -56,6 +60,24 @@ class _WhatsAppScreenState extends State<WhatsAppScreen> {
       if (mounted) setState(() => _loadError = e.toString());
     }
   }
+
+  Future<void> _loadOwnerNumber() async {
+    try {
+      final cfg = await _api.get('/config') as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _ownerPhone.text = cfg['ownerWhatsApp'] ?? '';
+          _ownerLoaded = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveOwnerNumber() => _run(() async {
+        final v = _ownerPhone.text.trim();
+        await _api.patch('/config', {'ownerWhatsApp': v.isEmpty ? null : v});
+        _snack(v.isEmpty ? 'Unknown-driver alerts will go to the linked number' : 'Unknown-driver alerts will go to $v');
+      });
 
   Future<void> _run(Future<void> Function() action) async {
     setState(() => _busy = true);
@@ -117,11 +139,41 @@ class _WhatsAppScreenState extends State<WhatsAppScreen> {
                 const Text('WhatsApp is turned off on this server (WHATSAPP=off).')
               else if (!owner)
                 const Text('Only the vehicle owner can link or unlink WhatsApp.')
-              else
+              else ...[
+                _ownerNumber(),
+                const SizedBox(height: 16),
                 ..._body(s),
+              ],
             ]),
     );
   }
+
+  Widget _ownerNumber() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Your WhatsApp number', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+              "Gets a message with a photo when someone who is not a registered driver sits in the driver's seat. "
+              'Use a different number from the linked one: WhatsApp does not notify you about messages you send yourself.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _ownerPhone,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Owner number', hintText: '+923001234567'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _busy || !_ownerLoaded ? null : _saveOwnerNumber, child: const Text('Save')),
+            ]),
+          ]),
+        ),
+      );
 
   Widget _statusCard(Map<String, dynamic> s) {
     final (icon, color, title) = switch (_state) {

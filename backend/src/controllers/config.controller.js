@@ -13,6 +13,7 @@ const FIELDS = [
   'ackWindowSec',
   'alertSensitivity',
   'videoRecordingEnabled',
+  'ownerWhatsApp',
   'notifications',
 ];
 

@@ -25,6 +25,16 @@ const systemConfigSchema = new mongoose.Schema(
     alertSensitivity: range(LIMITS.alertSensitivity),
 
     videoRecordingEnabled: { type: Boolean, default: true },
+    // Owner's own WhatsApp number: gets the unknown-driver alert with a photo.
+    ownerWhatsApp: {
+      type: String,
+      default: null,
+      set: (v) => (v ? String(v).trim() : null),
+      validate: {
+        validator: (v) => v == null || /^\+[1-9]\d{7,14}$/.test(v),
+        message: 'Use international format, e.g. +923001234567',
+      },
+    },
     notifications: {
       push: { type: Boolean, default: true },
       sound: { type: Boolean, default: true },

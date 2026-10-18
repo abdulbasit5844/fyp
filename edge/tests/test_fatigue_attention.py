@@ -141,6 +141,14 @@ def test_slow_blinks_warn_before_perclos_does():
     assert fatigue and "Slow blinks" in fatigue[0].description
 
 
+def test_metrics_after_the_face_leaves_the_camera():
+    # Regression: the Pi pipeline crashed in the perf log once the face was lost after 30 s.
+    f = Fusion(MonitorConfig())
+    _, _, _, t = drive(f, bursts(0.2, 4.0), 40)
+    _, _, _, _ = drive(f, lambda t: Signals(False), 2.0, t)
+    assert f.metrics["blinkRate"] == pytest.approx(15, abs=3)
+
+
 def test_fatigue_needs_enough_data():
     f = Fusion(MonitorConfig())
     raised, _, _, _ = drive(f, bursts(1.2, 3.0), 20)  # 40 % closed, but only 20 s observed

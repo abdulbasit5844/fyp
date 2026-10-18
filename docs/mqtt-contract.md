@@ -7,7 +7,7 @@ Broker: Mosquitto on the Pi, `127.0.0.1:1883`, localhost only. Every payload is 
 
 | Topic | QoS / retain | Payload |
 |---|---|---|
-| `dms/{id}/status` | 1, retained; also the Last Will with `{"online": false}` | `{online, state: "safe"\|"warning"\|"critical", monitoring, driverId?, location?: {lat, lng, accuracyM}, pipelineVersion, ts}` |
+| `dms/{id}/status` | 1, retained; also the Last Will with `{"online": false}` | `{online, state: "safe"\|"warning"\|"critical", monitoring, identity: "verifying"\|"verified"\|"unknown"\|"none", driverId?, location?: {lat, lng, accuracyM}, pipelineVersion, ts}` |
 | `dms/{id}/event` | 1 | `{eventId, type, severity: "warning"\|"critical", detectedAt, description?, driverId?, signals?: {ear, emotion, emotionConfidence, yaw, pitch, roll, sustainedMs, mouthOpen, perclos, blinkRate, blinkMs, yawns}, location?}` |
 | `dms/{id}/event/ack` | 1 | `{eventId, ts}`: driver pressed the physical button |
 | `dms/{id}/event/escalate` | 1 | `{eventId, location?: {lat, lng, accuracyM, capturedAt}, ts}`: acknowledgment window expired |
@@ -17,6 +17,13 @@ Broker: Mosquitto on the Pi, `127.0.0.1:1883`, localhost only. Every payload is 
 
 `type` is one of `drowsiness`, `yawning`, `fatigue`, `inattention`, `looking_down`, `emotional_distress`,
 `unverified_driver`, `unauthorized_occupant`, `key_left_inside`. `yawning` and `fatigue` are always warnings.
+
+**Driver identity.** Monitoring starts only when an authorized enrolled driver is recognised (3 matching
+face checks in a row). Six clear looks that match no authorized driver (about 2 s), or 15 s with the face
+never clear enough, raise one `unverified_driver` event (critical, `photo` = base64 JPEG of the person). It
+is silent in the car: the backend escalates it at once to the owner's WhatsApp with the photo (no
+acknowledgment window, emergency contacts are not messaged). The check keeps running; if an authorized
+driver is recognised later, the event is resolved and monitoring starts.
 
 ## Backend → edge
 

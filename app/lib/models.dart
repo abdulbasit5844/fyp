@@ -28,7 +28,8 @@ class Device {
         state = driverStateFrom(j['currentState']),
         lastSeenAt = _date(j['lastSeenAt']),
         stateUpdatedAt = _date(j['stateUpdatedAt']),
-        activeDriverName = (j['activeDriver'] is Map) ? j['activeDriver']['displayName'] : null;
+        activeDriverName = (j['activeDriver'] is Map) ? j['activeDriver']['displayName'] : null,
+        identity = j['identity'] ?? 'verifying';
 
   final String id, deviceId, name;
   final bool online, monitoring;
@@ -36,6 +37,9 @@ class Device {
   final DriverState state;
   final DateTime? lastSeenAt, stateUpdatedAt;
   final String? activeDriverName;
+  /// verifying | verified | unknown | none (nobody enrolled: whoever drives is monitored)
+  final String identity;
+  bool get unknownDriver => identity == 'unknown';
 }
 
 class SafetyEvent {
@@ -55,12 +59,14 @@ class SafetyEvent {
         signals = (j['signals'] as Map?)?.cast<String, dynamic>() ?? const {},
         clip = j['videoClip'] is Map ? VideoClip.fromJson(j['videoClip']) : null,
         driverName = j['driver'] is Map ? j['driver']['displayName'] : null,
+        photo = j['photo'],
         notifications = ((j['notifications'] as List?) ?? const [])
             .map((n) => AlertDelivery.fromJson(n as Map<String, dynamic>))
             .toList();
 
   final String id, type, severity, status, actionTaken;
   final String? description, acknowledgedVia, driverName;
+  final String? photo; // unverified_driver: base64 JPEG of the person in the seat
   final DateTime detectedAt;
   final DateTime? acknowledgedAt, escalatedAt;
   final double? lat, lng;
@@ -80,7 +86,7 @@ const eventTitles = {
   'inattention': 'Eyes off the road',
   'looking_down': 'Looking down (phone?)',
   'emotional_distress': 'Driver distressed',
-  'unverified_driver': 'Unrecognized driver',
+  'unverified_driver': 'Unknown person detected',
   'unauthorized_occupant': 'Unknown occupant',
   'key_left_inside': 'Key left inside',
 };

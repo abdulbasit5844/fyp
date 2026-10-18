@@ -222,4 +222,34 @@ async function notifyEscalation(event, ownerName) {
   return Promise.all(jobs);
 }
 
-module.exports = { notifyOwnerAlert, notifyEscalation, sendPush, sendSms, sendEmail, setMailTransport };
+// Unknown person in the driver's seat: the owner gets the photo on WhatsApp right away,
+// at the number set under WhatsApp alerts, or else at the linked account itself.
+async function notifyUnknownDriver(event, photo, device) {
+  const cfg = await SystemConfig.findOne({ owner: event.owner });
+  const linked = whatsapp.getStatus().phone;
+  const to = cfg?.ownerWhatsApp || (linked && `+${linked}`);
+  const time = (event.detectedAt || new Date())
+    .toLocaleTimeString('en-PK', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit' });
+  const caption = [
+    '🚨 *UNKNOWN DRIVER*',
+    `Someone the system does not recognise is in the driver's seat of ${device?.name || 'your vehicle'} (${time}).`,
+    event.description ? `(${event.description})` : null,
+    'Monitoring is paused until a registered driver is recognised. Open the app to see the live camera.',
+  ].filter(Boolean).join('\n');
+
+  const log = new AlertLog({
+    event: event._id, owner: event.owner, alertType: 'escalation', channel: 'whatsapp', recipientUser: event.owner,
+  });
+  let error = null;
+  if (cfg?.notifications?.whatsapp === false) error = 'WhatsApp alerts are switched off in Settings';
+  else if (!to) error = 'No WhatsApp number: set yours in Settings → WhatsApp alerts';
+  if (error) {
+    Object.assign(log, { deliveryStatus: 'failed', error });
+    return [await log.save()];
+  }
+  return [await deliver(log, () => (photo
+    ? whatsapp.sendImage(to, Buffer.from(photo, 'base64'), caption)
+    : whatsapp.sendText(to, caption)))];
+}
+
+module.exports = { notifyOwnerAlert, notifyEscalation, notifyUnknownDriver, sendPush, sendSms, sendEmail, setMailTransport };

@@ -28,7 +28,10 @@ from .settings import DeviceSettings, MonitorConfig
 
 log = logging.getLogger(__name__)
 
-VERIFY_TIMEOUT = 10.0  # seconds of unrecognised face before an unverified_driver event
+VERIFY_TIMEOUT = 15.0  # face in view this long without being identified → treated as unknown
+UNKNOWN_AFTER = 6  # clear looks in a row that match no authorized driver → unknown person (~2 s)
+UNSURE_SCORE = 0.30  # just under the match threshold: not a match, but not clearly a stranger either
+VERIFY_GAP = 3.0  # face out of view this long while verifying → start counting afresh
 REVERIFY_AFTER = 30.0  # face absent this long → possible driver change
 LIVE_KEEPALIVE = 45.0  # seconds without a request from the app before the stream stops
 ENROLL_SAMPLES = 5
@@ -114,11 +117,10 @@ class Pipeline:
         self.detecting = False
 
         # Identity
-        self.driver: dict | None = None  # {"id", "name"} once verified
-        self.verified = not verify  # without verification, monitoring starts at once
-        self.unverified_since: float | None = None
-        self.unverified_reported = False
-        self.match_streak: tuple[str | None, int] = (None, 0)
+        # Monitoring only starts once a registered, authorized driver is recognised.
+        # identity: verifying | verified | unknown | none (verification off / nobody enrolled)
+        self.unknown_event: str | None = None  # open unverified_driver event
+        self._reset_identity()
         self.face_last_seen = 0.0
         # Enrollment request in progress
         self.enroll: dict | None = None
@@ -163,9 +165,7 @@ class Pipeline:
                 self.fusion.reset()
                 self.state = "safe"
             # Verify the driver again on every start.
-            self.verified, self.driver = not self.verify_enabled, None
-            self.unverified_since, self.unverified_reported = None, False
-            self.match_streak = (None, 0)
+            self._reset_identity()
             self._reset_driver_model()
         log.info("detection %s from the app", "started" if enabled else "stopped")
         self._publish_status(time.monotonic(), force=True)
@@ -224,7 +224,10 @@ class Pipeline:
 
     # --- events ---
 
-    def _raise_event(self, type_, severity, description, signals=None, sustained_ms=None):
+    def _raise_event(self, type_, severity, description, signals=None, sustained_ms=None, photo=None,
+                     local_alert=True):
+        """local_alert=False: no buzzer and no edge escalation timer (the backend
+        handles it, e.g. an unknown driver goes straight to the owner)."""
         event_id = uuid.uuid4().hex
         payload = {
             "eventId": event_id,
@@ -243,8 +246,11 @@ class Pipeline:
             }
             payload["signals"] = {k: (round(v, 3) if isinstance(v, float) else v)
                                   for k, v in payload["signals"].items() if v is not None}
+        if photo:
+            payload["photo"] = photo  # base64 JPEG of the person in the driver's seat
         self.mqtt.publish("event", payload)
-        self.alerts.raise_alert(event_id, type_, severity)
+        if local_alert:
+            self.alerts.raise_alert(event_id, type_, severity)
         if self.cfg.videoRecordingEnabled:
             self.recorder.trigger(event_id)
         log.warning("EVENT %s %s: %s", severity.upper(), type_, description)
@@ -318,37 +324,72 @@ class Pipeline:
         log.info("enrollment for %s %s", e["driverId"], "complete" if ok else f"failed: {fields.get('error')}")
         self.enroll = None
 
+    def _reset_identity(self):
+        """Back to "who is driving?". Closes an open unknown-person event."""
+        if self.unknown_event:
+            self._resolve_event(self.unknown_event)
+        self.verified, self.driver = not self.verify_enabled, None
+        self.identity = "verifying" if self.verify_enabled else "none"
+        self.unknown_event, self.last_non_match = None, None
+        self.unverified_since, self.last_verify_at = None, 0.0
+        self.match_streak: tuple[str | None, int] = (None, 0)
+        self.non_matches = 0
+
     def _verify(self, frame, face, now):
-        """Returns True once the driver may be monitored."""
+        """Returns True once the driver may be monitored: only a recognised,
+        authorized driver. Anyone else raises one unverified_driver event with a
+        photo, which the backend sends to the owner on WhatsApp; the check keeps
+        running, so a registered driver who is recognised later is still monitored."""
         enrolled = [d for d in self.drivers if d.get("embeddings")]
         if not self.verify_enabled or not enrolled:
-            self.verified, self.driver = True, None
+            # Nobody to compare against: monitor whoever drives.
+            self.verified, self.driver, self.identity = True, None, "none"
             return True
 
-        if self.unverified_since is None:
-            self.unverified_since = now
+        if self.unverified_since is None or now - self.last_verify_at > VERIFY_GAP:
+            self.unverified_since, self.non_matches, self.match_streak = now, 0, (None, 0)
+        self.last_verify_at = now
         vec = self._embedding(frame, face)
-        if vec is None:
-            return False
-        m = best_match(vec, enrolled, self.s.verify_threshold)
-        last_id, streak = self.match_streak
-        self.match_streak = (m.driver_id, streak + 1 if m.driver_id == last_id else 1)
+        if vec is not None:
+            m = best_match(vec, enrolled, self.s.verify_threshold)
+            if m.driver_id and m.authorized:
+                last_id, streak = self.match_streak
+                self.match_streak = (m.driver_id, streak + 1 if m.driver_id == last_id else 1)
+                self.non_matches = 0
+                if self.match_streak[1] >= 3:
+                    self._verified_as(m, now)
+                    return True
+                return False
+            self.match_streak = (None, 0)
+            # A registered but unauthorized driver, or clearly someone else. Scores just
+            # under the threshold (a registered driver at a bad angle) count for neither.
+            if m.driver_id or m.score < UNSURE_SCORE:
+                self.non_matches += 1
+                self.last_non_match = m
 
-        if m.driver_id and m.authorized and self.match_streak[1] >= 3:
-            self.verified, self.driver = True, {"id": m.driver_id, "name": m.name}
-            self.unverified_since, self.unverified_reported = None, False
-            log.info("driver verified: %s (score %.2f)", m.name, m.score)
-            return True
-
-        if now - self.unverified_since >= VERIFY_TIMEOUT:
-            if not self.unverified_reported:
-                reason = "Driver is not authorized" if m.driver_id else "Driver not recognized"
-                self._raise_event("unverified_driver", "warning", f"{reason} (match {max(m.score, 0):.2f})")
-                self.unverified_reported = True
-            # Safety first: keep monitoring an unknown driver rather than not at all.
-            self.verified, self.driver = True, None
-            return True
+        if self.unknown_event is None and (self.non_matches >= UNKNOWN_AFTER
+                                           or now - self.unverified_since >= VERIFY_TIMEOUT):
+            m = self.last_non_match
+            if m is not None and m.driver_id:
+                why = f"{m.name} is registered but not authorized to drive"
+            elif m is not None:
+                why = f"Unknown person in the driver's seat (best match {max(m.score, 0):.2f})"
+            else:
+                why = "Driver could not be identified (face not clearly visible)"
+            self.identity = "unknown"
+            self.unknown_event = self._raise_event("unverified_driver", "critical", why,
+                                                   photo=face_photo(frame, face), local_alert=False)
+            self._publish_status(now, force=True)
         return False
+
+    def _verified_as(self, m, now):
+        if self.unknown_event:  # an authorized driver after all: close the unknown-person alert
+            self._resolve_event(self.unknown_event)
+            self.unknown_event = None
+        self.verified, self.driver, self.identity = True, {"id": m.driver_id, "name": m.name}, "verified"
+        self.unverified_since, self.non_matches = None, 0
+        log.info("driver verified: %s (score %.2f)", m.name, m.score)
+        self._publish_status(now, force=True)
 
     # --- per-frame work ---
 
@@ -425,6 +466,7 @@ class Pipeline:
             "live": self.camera.live,
             "liveQuality": self.camera.live_quality,
             "monitoring": self.detecting and self.verified,
+            "identity": self.identity,
             "driverId": self.driver["id"] if self.driver else None,
             "location": self.gps.position,
             "pipelineVersion": __version__,
@@ -480,9 +522,9 @@ class Pipeline:
                 face = faces[0] if faces else None
                 if face is not None:
                     self.face_last_seen = now
-                elif self.verified and self.verify_enabled and now - self.face_last_seen > REVERIFY_AFTER:
+                elif self.verify_enabled and self.identity != "verifying" and now - self.face_last_seen > REVERIFY_AFTER:
                     log.info("face absent %ss: will re-verify the driver", int(REVERIFY_AFTER))
-                    self.verified, self.driver, self.unverified_since = False, None, None
+                    self._reset_identity()
                     self.fusion.reset()
                     self._reset_driver_model()
 

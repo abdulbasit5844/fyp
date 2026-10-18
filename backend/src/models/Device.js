@@ -18,6 +18,9 @@ const deviceSchema = new mongoose.Schema(
     stateUpdatedAt: Date,
     activeDriver: { type: mongoose.Schema.Types.ObjectId, ref: 'DriverProfile', default: null },
     monitoring: { type: Boolean, default: false }, // true once the driver is verified
+    // Who is in the driver's seat: still checking, a recognised driver, someone unknown,
+    // or none (nobody enrolled, so whoever drives is monitored).
+    identity: { type: String, enum: ['verifying', 'verified', 'unknown', 'none'], default: 'verifying' },
     // Start/Stop detecting from the app. Off: the unit runs no detection and raises no alerts.
     detectionEnabled: { type: Boolean, default: false },
 

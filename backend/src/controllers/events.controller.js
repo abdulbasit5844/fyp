@@ -37,6 +37,7 @@ async function active(req, res) {
 
 async function get(req, res) {
   const event = await SafetyEvent.findOne({ _id: req.params.id, owner: req.ownerId })
+    .select('+photo')
     .populate('videoClip')
     .populate({ path: 'driver', select: 'displayName' });
   if (!event) throw ApiError.notFound('Event not found');

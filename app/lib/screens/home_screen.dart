@@ -114,10 +114,13 @@ class _StatusCardState extends State<_StatusCard> {
     final device = live.device;
     final stopped = device != null && !device.detectionEnabled;
     final state = live.state;
+    final unknown = !stopped && device != null && device.online && device.unknownDriver;
 
-    final color = stopped ? Colors.blueGrey : stateColor(state);
+    final color = stopped ? Colors.blueGrey : (unknown ? criticalColor : stateColor(state));
     final label = stopped
         ? 'STOPPED'
+        : unknown
+            ? 'UNKNOWN DRIVER'
         : switch (state) {
             DriverState.safe => 'SAFE',
             DriverState.warning => 'WARNING',
@@ -125,6 +128,8 @@ class _StatusCardState extends State<_StatusCard> {
           };
     final icon = stopped
         ? Icons.pause_circle_outline
+        : unknown
+            ? Icons.person_off
         : switch (state) {
             DriverState.safe => Icons.verified_user,
             DriverState.warning => Icons.warning_amber_rounded,
@@ -139,10 +144,15 @@ class _StatusCardState extends State<_StatusCard> {
       subtitle = '${device.name} is offline (last seen $seen)';
     } else if (stopped) {
       subtitle = 'Driver detection is off. Press Start detecting when the driver is ready.';
+    } else if (unknown) {
+      subtitle = "Someone who is not a registered driver is in the driver's seat of ${device.name}. "
+          'Monitoring is paused until a registered driver is recognised.';
     } else if (!device.monitoring) {
-      subtitle = '${device.name} is detecting, waiting for the driver to sit facing the camera';
+      subtitle = "${device.name}: checking the driver's face. Sit facing the camera.";
+    } else if (device.identity == 'none') {
+      subtitle = '${device.name} • monitoring (no drivers enrolled, so the driver is not identified)';
     } else {
-      subtitle = '${device.name} • monitoring ${device.activeDriverName ?? 'unknown driver'}';
+      subtitle = '${device.name} • monitoring ${device.activeDriverName ?? 'the driver'}';
     }
 
     return Card(
@@ -157,6 +167,14 @@ class _StatusCardState extends State<_StatusCard> {
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(color: readable(context, color), fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(subtitle, textAlign: TextAlign.center),
+            if (unknown) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveScreen())),
+                icon: const Icon(Icons.videocam),
+                label: const Text('Watch live camera'),
+              ),
+            ],
             if (device != null) ...[
               const SizedBox(height: 20),
               SizedBox(

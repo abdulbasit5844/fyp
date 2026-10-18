@@ -44,6 +44,26 @@ void main() {
     expect(j['notifications'], {'push': true, 'sound': false, 'smsFallback': true, 'whatsapp': true});
   });
 
+  test('Device identity and the driver name from live updates', () {
+    final d = Device.fromJson({
+      'id': 'd1', 'deviceId': 'pi-1', 'online': true, 'monitoring': true, 'identity': 'verified',
+      'activeDriver': {'id': 'x', 'displayName': 'basit'},
+    });
+    expect(d.activeDriverName, 'basit');
+    expect(d.unknownDriver, isFalse);
+    expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1', 'identity': 'unknown'}).unknownDriver, isTrue);
+    expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1'}).identity, 'verifying');
+  });
+
+  test('Unknown-driver event carries the photo', () {
+    final e = SafetyEvent.fromJson({
+      'id': 'u1', 'eventType': 'unverified_driver', 'severity': 'critical', 'status': 'escalated',
+      'detectedAt': '2026-10-19T01:00:00.000Z', 'photo': 'AAAA',
+    });
+    expect(e.title, 'Unknown person detected');
+    expect(e.photo, 'AAAA');
+  });
+
   test('Device state defaults to safe for unknown values', () {
     expect(driverStateFrom('critical'), DriverState.critical);
     expect(driverStateFrom(null), DriverState.safe);

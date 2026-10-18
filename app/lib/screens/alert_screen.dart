@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../state/live_state.dart';
 import '../theme.dart';
+import 'live_screen.dart';
 
 /// Shows an alert as a small popup (M5/M6): red for critical, amber for
 /// warnings, a countdown to escalation and an Acknowledge button. When the
@@ -15,8 +17,92 @@ import '../theme.dart';
 Future<void> showAlertPopup(BuildContext context, SafetyEvent event) => showDialog<void>(
       context: context,
       barrierDismissible: true,
-      builder: (_) => AlertPopup(event: event),
+      builder: (_) => event.type == 'unverified_driver' ? UnknownPersonPopup(event: event) : AlertPopup(event: event),
     );
+
+/// Someone the vehicle unit does not recognise is in the driver's seat: their
+/// photo, whether the owner's WhatsApp alert went out, and the live camera.
+class UnknownPersonPopup extends StatelessWidget {
+  const UnknownPersonPopup({super.key, required this.event});
+  final SafetyEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = context.watch<LiveState>();
+    final whatsapp = live.deliveries[event.id]?.where((n) => n.channel == 'whatsapp').firstOrNull;
+    final (IconData icon, Color color, String text) = switch (whatsapp?.status) {
+      'sent' => (Icons.check_circle, safeColor, 'Owner alerted on WhatsApp with this photo'),
+      'failed' => (Icons.error, criticalColor, 'WhatsApp not sent: ${whatsapp!.error ?? 'unknown error'}'),
+      _ => (Icons.schedule, warningColor, 'Alerting the owner on WhatsApp…'),
+    };
+    final photo = event.photo;
+
+    return Dialog(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              color: criticalColor,
+              padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+              child: Row(children: [
+                const Icon(Icons.person_off, color: Colors.white, size: 32),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text('Unknown person detected',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ]),
+            ),
+            if (photo != null)
+              Image.memory(base64Decode(photo), height: 240, fit: BoxFit.cover, gaplessPlayback: true),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text(event.description ?? "Someone who is not a registered driver is in the driver's seat.",
+                    style: Theme.of(context).textTheme.bodyLarge),
+                const SizedBox(height: 4),
+                Text(DateFormat('HH:mm:ss, d MMM').format(event.detectedAt),
+                    style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Icon(icon, color: color, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(text)),
+                ]),
+                const SizedBox(height: 8),
+                const Text('Driver monitoring is paused until a registered driver is recognised.',
+                    style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () {
+                    final nav = Navigator.of(context);
+                    nav.pop();
+                    nav.push(MaterialPageRoute(builder: (_) => const LiveScreen()));
+                  },
+                  style: FilledButton.styleFrom(backgroundColor: criticalColor, foregroundColor: Colors.white),
+                  icon: const Icon(Icons.videocam),
+                  label: const Text('Watch live camera'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 class AlertPopup extends StatefulWidget {
   const AlertPopup({super.key, required this.event});

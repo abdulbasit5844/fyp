@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -193,6 +195,12 @@ class _EventTile extends StatelessWidget {
               )
             else if (e.clip != null)
               Chip(label: Text(e.clip!.status == 'deleted' ? 'Clip removed to free space' : 'Clip is being saved…')),
+            if (e.type == 'unverified_driver')
+              OutlinedButton.icon(
+                onPressed: () => _showPhoto(context, e.id),
+                icon: const Icon(Icons.photo),
+                label: const Text('Photo'),
+              ),
             if (e.lat != null)
               OutlinedButton.icon(
                 onPressed: () => launchUrl(Uri.parse('https://maps.google.com/?q=${e.lat},${e.lng}')),
@@ -207,6 +215,21 @@ class _EventTile extends StatelessWidget {
               ),
           ]),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showPhoto(BuildContext context, String id) async {
+    final detail = SafetyEvent.fromJson(await context.read<ApiClient>().get('/events/$id'));
+    if (!context.mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Person in the driver\'s seat'),
+        content: detail.photo == null
+            ? const Text('No photo was taken for this event.')
+            : Image.memory(base64Decode(detail.photo!), fit: BoxFit.contain),
+        actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('Close'))],
       ),
     );
   }
