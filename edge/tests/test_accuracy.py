@@ -59,11 +59,11 @@ def test_off_centre_camera_does_not_cause_inattention_alerts():
     fusion = Fusion(cfg)
     raised = []
     for i in range(60):  # 6 s of normal driving, seen from the side
-        yaw, pitch = b.relative_pose(22.0 + (i % 5), -10.0)
+        yaw, pitch, _ = b.relative_pose(22.0 + (i % 5), -10.0)
         raised += fusion.update(Signals(True, 0.3, yaw, pitch, 0, eyes_closed=False), i * 0.1).raised
     assert raised == []
     for i in range(60, 120):  # now really looking away: 45° from their normal position
-        yaw, pitch = b.relative_pose(67.0, -10.0)
+        yaw, pitch, _ = b.relative_pose(67.0, -10.0)
         raised += fusion.update(Signals(True, 0.3, yaw, pitch, 0, eyes_closed=False), i * 0.1).raised
     assert [t.type for t in raised][:1] == ["inattention"]
 
@@ -148,3 +148,24 @@ def test_canonical_pose_matches_mediapipe_on_a_real_face(canonical):
     # (the 6-point model said 34.7°).
     assert abs(yaw) == pytest.approx(20.1, abs=5)
     assert abs(pitch) == pytest.approx(11.8, abs=5)
+
+
+# --- event precision, recall and detection delay (scripts/evaluate.py simulate) ---
+
+def test_drowsiness_precision_recall_and_delay_on_simulated_drives():
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from evaluate import prf, simulate
+
+    res = simulate(sessions=6, fps=10, seed=3, minutes=3)
+    old, new = res["drowsiness"]["2 s EAR rule only"], res["drowsiness"]["with refinements"]
+    p, r, _ = prf(new["tp"], new["fp"], new["fn"])
+    print(f"\nrefined: precision {p:.3f} recall {r:.3f}; 2 s rule: precision "
+          f"{prf(old['tp'], old['fp'], old['fn'])[0]:.3f} recall {prf(old['tp'], old['fp'], old['fn'])[1]:.3f}")
+    assert p >= 0.85 and r >= 0.95
+    assert new["fp"] < old["fp"] and new["tp"] > old["tp"]  # yawns no longer alert, nods now do
+    assert np.median(new["delays"]["microsleep"]) <= 2.5  # 2 s hold + smoothing
+    assert np.median(new["delays"]["head nod"]) < 1.0
+    assert all(x is not None for x in res["fatigue"]["fatigued"])
+    assert all(x is None for x in res["fatigue"]["alert"])

@@ -85,9 +85,12 @@ Without these, escalations are still logged and shown in the app; delivery is re
 
 ```
 cd backend && npm test                     # API + edge→backend flow, in-memory MongoDB
-cd edge && .venv/Scripts/python -m pytest  # EAR, head pose, NMEA, fusion, alerts, recorder
+cd edge && .venv/Scripts/python -m pytest  # EAR, fatigue, head pose, NMEA, fusion, alerts, recorder
 cd app && flutter test
 ```
+
+Precision / recall / detection delay and head-pose error for the report: see `edge/reports/README.md`
+(`python edge/scripts/evaluate.py simulate`, `... headpose --aflw <AFLW2000 folder>`).
 
 ## Not built yet
 

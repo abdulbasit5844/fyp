@@ -75,7 +75,10 @@ class SafetyEvent {
 
 const eventTitles = {
   'drowsiness': 'Drowsiness detected',
+  'yawning': 'Yawning',
+  'fatigue': 'Signs of fatigue',
   'inattention': 'Eyes off the road',
+  'looking_down': 'Looking down (phone?)',
   'emotional_distress': 'Driver distressed',
   'unverified_driver': 'Unrecognized driver',
   'unauthorized_occupant': 'Unknown occupant',
@@ -177,6 +180,7 @@ class MonitorSettings {
       : earThreshold = _num(j['earThreshold'])!,
         earSustainSec = _num(j['earSustainSec'])!,
         headPoseThresholdDeg = _num(j['headPoseThresholdDeg'])!,
+        headPitchThresholdDeg = _num(j['headPitchThresholdDeg']) ?? 20,
         headPoseSustainSec = _num(j['headPoseSustainSec'])!,
         emotionSustainSec = _num(j['emotionSustainSec'])!,
         ackWindowSec = _num(j['ackWindowSec'])!,
@@ -187,7 +191,7 @@ class MonitorSettings {
         smsFallback = j['notifications']?['smsFallback'] ?? false,
         whatsapp = j['notifications']?['whatsapp'] ?? true;
 
-  double earThreshold, earSustainSec, headPoseThresholdDeg, headPoseSustainSec;
+  double earThreshold, earSustainSec, headPoseThresholdDeg, headPitchThresholdDeg, headPoseSustainSec;
   double emotionSustainSec, ackWindowSec, alertSensitivity;
   bool videoRecordingEnabled, push, sound, smsFallback, whatsapp;
 
@@ -195,6 +199,7 @@ class MonitorSettings {
         'earThreshold': double.parse(earThreshold.toStringAsFixed(2)),
         'earSustainSec': earSustainSec,
         'headPoseThresholdDeg': headPoseThresholdDeg.roundToDouble(),
+        'headPitchThresholdDeg': headPitchThresholdDeg.roundToDouble(),
         'headPoseSustainSec': headPoseSustainSec,
         'emotionSustainSec': emotionSustainSec,
         'ackWindowSec': ackWindowSec.roundToDouble(),

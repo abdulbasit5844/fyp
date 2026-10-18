@@ -125,10 +125,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const _Header('Attention'),
                     _SliderTile(
-                      title: 'Head turn limit',
-                      value: s.headPoseThresholdDeg, min: 15, max: 45, divisions: 6,
+                      title: 'Head turn limit (left / right)',
+                      help: 'Short glances to the mirrors are ignored.',
+                      value: s.headPoseThresholdDeg.clamp(20, 45).toDouble(), min: 20, max: 45, divisions: 5,
                       label: '${s.headPoseThresholdDeg.round()}°',
                       onChanged: (v) => _set(() => s.headPoseThresholdDeg = v),
+                    ),
+                    _SliderTile(
+                      title: 'Head tilt limit (up / down)',
+                      help: 'Looking down past this (e.g. at a phone) raises its own alert.',
+                      value: s.headPitchThresholdDeg.clamp(20, 45).toDouble(), min: 20, max: 45, divisions: 5,
+                      label: '${s.headPitchThresholdDeg.round()}°',
+                      onChanged: (v) => _set(() => s.headPitchThresholdDeg = v),
                     ),
                     _SliderTile(
                       title: 'Looking away for',

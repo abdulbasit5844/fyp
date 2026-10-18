@@ -127,10 +127,13 @@ test('system config: defaults, bounds, revision', async () => {
   const { token } = state;
   let r = await api('GET', '/api/config', { token });
   assert.equal(r.body.earThreshold, 0.25);
+  assert.equal(r.body.headPitchThresholdDeg, 20);
   assert.equal(r.body.revision, 1);
 
   r = await api('PATCH', '/api/config', { token, body: { earThreshold: 0.5 } });
   assert.equal(r.status, 400);
+  r = await api('PATCH', '/api/config', { token, body: { headPoseThresholdDeg: 15 } });
+  assert.equal(r.status, 400, 'head turn limit starts at 20° (FR5.4)');
 
   r = await api('PATCH', '/api/config', { token, body: { earThreshold: 0.22, ackWindowSec: 10, notifications: { smsFallback: true } } });
   assert.equal(r.status, 200);

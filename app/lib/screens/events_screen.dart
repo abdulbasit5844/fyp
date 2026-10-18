@@ -167,6 +167,12 @@ class _EventTile extends StatelessWidget {
             if (e.driverName != null) Text('Driver: ${e.driverName}'),
             if (e.signals['ear'] != null) Text('EAR: ${e.signals['ear']}'),
             if (e.signals['yaw'] != null) Text('Yaw: ${(e.signals['yaw'] as num).round()}°'),
+            if (e.signals['pitch'] != null) Text('Pitch: ${(e.signals['pitch'] as num).round()}° (+ = down)'),
+            if (e.signals['perclos'] != null)
+              Text('PERCLOS: ${((e.signals['perclos'] as num) * 100).round()}% of the last minute'),
+            if (e.signals['blinkRate'] != null) Text('Blinks: ${e.signals['blinkRate']}/min'),
+            if (e.signals['blinkMs'] != null) Text('Blink duration: ${e.signals['blinkMs']} ms'),
+            if ((e.signals['yawns'] ?? 0) > 0) Text('Yawns (5 min): ${e.signals['yawns']}'),
             if (e.signals['emotion'] != null) Text('Emotion: ${e.signals['emotion']}'),
             if (e.signals['sustainedMs'] != null)
               Text('Held for ${((e.signals['sustainedMs'] as num) / 1000).toStringAsFixed(1)} s'),

@@ -14,7 +14,8 @@ const systemConfigSchema = new mongoose.Schema(
     earThreshold: range(LIMITS.earThreshold),
     earSustainSec: range({ ...LIMITS.sustainSec, default: 2 }),
     // Inattention, FR1.4
-    headPoseThresholdDeg: range(LIMITS.headPoseDeg),
+    headPoseThresholdDeg: range(LIMITS.headPoseDeg), // left / right
+    headPitchThresholdDeg: range(LIMITS.headPitchDeg), // up / down
     headPoseSustainSec: range({ ...LIMITS.sustainSec, default: 2 }),
     // Emotion, FR1.3
     emotionSustainSec: range({ ...LIMITS.sustainSec, default: 3 }),

@@ -36,7 +36,8 @@ class MonitorConfig:
 
     earThreshold: float = 0.25
     earSustainSec: float = 2.0
-    headPoseThresholdDeg: float = 30.0
+    headPoseThresholdDeg: float = 30.0  # left / right (yaw)
+    headPitchThresholdDeg: float = 20.0  # up / down: looking down at a phone is the bigger risk
     headPoseSustainSec: float = 2.0
     emotionSustainSec: float = 3.0
     ackWindowSec: float = 15.0

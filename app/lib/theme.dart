@@ -39,7 +39,10 @@ Color readable(BuildContext context, Color c) =>
 /// Icon for each event type (UI-4: text + icon on every alert).
 IconData eventIcon(String type) => switch (type) {
       'drowsiness' => Icons.bedtime,
+      'yawning' => Icons.airline_seat_recline_extra,
+      'fatigue' => Icons.battery_alert,
       'inattention' => Icons.visibility_off,
+      'looking_down' => Icons.phone_android,
       'emotional_distress' => Icons.sentiment_very_dissatisfied,
       'unverified_driver' => Icons.person_off,
       'unauthorized_occupant' => Icons.no_accounts,

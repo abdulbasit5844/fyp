@@ -62,7 +62,11 @@ def test_sensitivity_shortens_required_duration():
 def test_inattention_warning_then_critical_and_clear():
     f = Fusion(MonitorConfig())
     away = Signals(True, ear=0.3, yaw=45, pitch=0)
-    raised, _, t = run(f, away, 2.2)
+    # A level 45° turn is where the side mirrors are: the first second is a
+    # mirror check, so the 2 s hold starts after it.
+    raised, _, t = run(f, away, 2.9)
+    assert raised == []
+    raised, _, t = run(f, away, 0.3, start=t)
     assert [(x.type, x.severity) for x in raised] == [("inattention", "warning")]
     raised, _, t = run(f, away, 2.0, start=t)
     assert [(x.type, x.severity) for x in raised] == [("inattention", "critical")]

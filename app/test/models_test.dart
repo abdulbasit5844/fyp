@@ -36,6 +36,8 @@ void main() {
     s.earThreshold = 0.23000000001;
     s.alertSensitivity = 4.2;
     final j = s.toJson();
+    // Older servers do not send the up/down limit yet.
+    expect(j['headPitchThresholdDeg'], 20);
     expect(j['earThreshold'], 0.23);
     expect(j['alertSensitivity'], 4);
     // WhatsApp alerts default to on when the server has not stored the flag yet.

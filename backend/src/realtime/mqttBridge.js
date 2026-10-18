@@ -12,7 +12,7 @@ function publish(topic, payload, opts = {}) {
 }
 
 const CONFIG_FIELDS = [
-  'earThreshold', 'earSustainSec', 'headPoseThresholdDeg', 'headPoseSustainSec', 'emotionSustainSec',
+  'earThreshold', 'earSustainSec', 'headPoseThresholdDeg', 'headPitchThresholdDeg', 'headPoseSustainSec', 'emotionSustainSec',
   'ackWindowSec', 'alertSensitivity', 'videoRecordingEnabled', 'notifications', 'revision',
 ];
 

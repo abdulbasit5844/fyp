@@ -137,7 +137,10 @@ async function deliver(log, sendFn) {
 
 const LABELS = {
   drowsiness: 'Drowsiness detected',
+  yawning: 'Driver is yawning',
+  fatigue: 'Driver showing signs of fatigue',
   inattention: 'Driver not watching the road',
+  looking_down: 'Driver looking down (phone?)',
   emotional_distress: 'Driver appears distressed',
   unverified_driver: 'Unrecognized driver',
   unauthorized_occupant: 'Unknown person in vehicle',

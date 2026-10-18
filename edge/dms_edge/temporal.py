@@ -20,7 +20,8 @@ class Sustained:
         elif self.since is not None and now - (self.last_true or now) > self.grace:
             self.since = None
             self.last_true = None
-        return 0.0 if self.since is None else now - self.since
+        # During a dropout the duration stops growing: it resumes if the condition comes back.
+        return 0.0 if self.since is None else self.last_true - self.since
 
     def reset(self):
         self.since = None

@@ -27,6 +27,9 @@ const cases = [
   ['Config defaults', m.SystemConfig, { owner }, true],
   ['Config EAR too high', m.SystemConfig, { owner, earThreshold: 0.35 }, false],
   ['Config ack too short', m.SystemConfig, { owner, ackWindowSec: 2 }, false],
+  ['Config head turn below 20°', m.SystemConfig, { owner, headPoseThresholdDeg: 15 }, false],
+  ['Config pitch limit ok', m.SystemConfig, { owner, headPitchThresholdDeg: 25 }, true],
+  ['Event looking_down ok', m.SafetyEvent, { edgeEventId: 'e9', owner, device, eventType: 'looking_down', severity: 'warning', detectedAt: new Date(), signals: { pitch: 31, perclos: 0.04, yawns: 1 } }, true],
   ['AlertLog ok', m.AlertLog, { event, owner, alertType: 'escalation', channel: 'push' }, true],
 ];
 

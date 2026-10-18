@@ -7,6 +7,7 @@ const FIELDS = [
   'earThreshold',
   'earSustainSec',
   'headPoseThresholdDeg',
+  'headPitchThresholdDeg',
   'headPoseSustainSec',
   'emotionSustainSec',
   'ackWindowSec',

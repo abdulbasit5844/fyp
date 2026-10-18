@@ -44,6 +44,7 @@ BLEND_NAMES = [
     "mouthUpperUpRight", "noseSneerLeft", "noseSneerRight",
 ]
 BLINK_LEFT, BLINK_RIGHT = BLEND_NAMES.index("eyeBlinkLeft"), BLEND_NAMES.index("eyeBlinkRight")
+JAW_OPEN = BLEND_NAMES.index("jawOpen")
 
 # The 146 mesh points the blendshape model reads (MediaPipe face_blendshapes_graph).
 BLEND_INPUT = [
@@ -77,6 +78,11 @@ class Face:
         if self.blend is None:
             return None
         return float((self.blend[BLINK_LEFT] + self.blend[BLINK_RIGHT]) / 2)
+
+    @property
+    def jaw_open(self) -> float | None:
+        """0 = mouth closed … 1 = wide open (yawn)."""
+        return None if self.blend is None else float(self.blend[JAW_OPEN])
 
 
 def _face_from_points(pts: np.ndarray, blend=None) -> Face:

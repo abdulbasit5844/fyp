@@ -44,19 +44,22 @@ class DriverBaseline:
         self.closure: list[float] = []
         self.yaw: list[float] = []
         self.pitch: list[float] = []
+        self.roll: list[float] = []
         self.ear_open = self.closure_open = None
-        self.yaw0 = self.pitch0 = 0.0
+        self.yaw0 = self.pitch0 = self.roll0 = 0.0
 
     @property
     def ready(self) -> bool:
         return self.ear_open is not None
 
-    def add(self, ear, closure, yaw, pitch):
+    def add(self, ear, closure, yaw, pitch, roll=None):
         if self.ready or ear is None or yaw is None:
             return
         self.ear.append(ear)
         self.yaw.append(yaw)
         self.pitch.append(pitch)
+        if roll is not None:
+            self.roll.append(roll)
         if closure is not None:
             self.closure.append(closure)
         if len(self.ear) >= self.samples:
@@ -65,6 +68,8 @@ class DriverBaseline:
             self.closure_open = float(np.percentile(self.closure, 25)) if self.closure else None
             self.yaw0 = float(np.clip(np.median(self.yaw), -MAX_NEUTRAL_DEG, MAX_NEUTRAL_DEG))
             self.pitch0 = float(np.clip(np.median(self.pitch), -MAX_NEUTRAL_DEG, MAX_NEUTRAL_DEG))
+            if self.roll:
+                self.roll0 = float(np.clip(np.median(self.roll), -MAX_NEUTRAL_DEG, MAX_NEUTRAL_DEG))
 
     def eyes_closed(self, ear, closure, ear_threshold: float) -> bool | None:
         """ear_threshold is the user's EAR setting (default 0.25); higher = more
@@ -79,7 +84,7 @@ class DriverBaseline:
         limit = self.ear_open * EAR_CLOSED_RATIO * sensitivity if self.ready else ear_threshold
         return ear < limit
 
-    def relative_pose(self, yaw, pitch):
+    def relative_pose(self, yaw, pitch, roll=None):
         if yaw is None:
-            return None, None
-        return yaw - self.yaw0, pitch - self.pitch0
+            return None, None, None
+        return yaw - self.yaw0, pitch - self.pitch0, None if roll is None else roll - self.roll0

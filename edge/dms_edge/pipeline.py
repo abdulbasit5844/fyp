@@ -130,7 +130,7 @@ class Pipeline:
         self.emotion_avg: np.ndarray | None = None
         # Per-driver calibration and per-signal smoothing (see calibration.py)
         self.baseline = DriverBaseline()
-        self.smooth = {k: Median3() for k in ("ear", "closure", "yaw", "pitch")}
+        self.smooth = {k: Median3() for k in ("ear", "closure", "mouth", "yaw", "pitch", "roll")}
         self.timing = {"frames": 0, "infer": 0.0, "t0": time.monotonic()}
 
     # --- MQTT handlers ---
@@ -239,6 +239,7 @@ class Pipeline:
             payload["signals"] = {
                 "ear": signals.ear, "yaw": signals.yaw, "pitch": signals.pitch, "roll": signals.roll,
                 "emotion": signals.emotion, "emotionConfidence": signals.emotion_conf, "sustainedMs": sustained_ms,
+                "mouthOpen": signals.mouth_open, **self.fusion.metrics,
             }
             payload["signals"] = {k: (round(v, 3) if isinstance(v, float) else v)
                                   for k, v in payload["signals"].items() if v is not None}
@@ -371,16 +372,19 @@ class Pipeline:
         sm = self.smooth
         ear = sm["ear"](drowsiness.face_ear(face.points))
         closure = sm["closure"](face.eye_closure)
-        yaw, pitch = sm["yaw"](yaw), sm["pitch"](pitch)
+        jaw = face.jaw_open
+        mouth = sm["mouth"](jaw if jaw is not None else drowsiness.mouth_aspect_ratio(face.points))
+        yaw, pitch, roll = sm["yaw"](yaw), sm["pitch"](pitch), sm["roll"](roll)
 
         # Learn this driver's normal eyes / head position, then judge relative to it.
         if not self.baseline.ready:
-            self.baseline.add(ear, closure, yaw, pitch)
+            self.baseline.add(ear, closure, yaw, pitch, roll)
             if self.baseline.ready:
                 b = self.baseline
-                log.info("calibrated driver: open EAR %.3f, eye closure %s, neutral yaw %.0f° pitch %.0f°",
-                         b.ear_open, "n/a" if b.closure_open is None else f"{b.closure_open:.2f}", b.yaw0, b.pitch0)
-        rel_yaw, rel_pitch = self.baseline.relative_pose(yaw, pitch)
+                log.info("calibrated driver: open EAR %.3f, eye closure %s, neutral yaw %.0f° pitch %.0f° roll %.0f°",
+                         b.ear_open, "n/a" if b.closure_open is None else f"{b.closure_open:.2f}", b.yaw0, b.pitch0,
+                         b.roll0)
+        rel_yaw, rel_pitch, rel_roll = self.baseline.relative_pose(yaw, pitch, roll)
         closed = self.baseline.eyes_closed(ear, closure, self.cfg.earThreshold)
 
         if self.emotion and frame_no % self.s.emotion_every_n == 0 and face.bbox[2] >= MIN_ID_FACE_PX:
@@ -391,7 +395,8 @@ class Pipeline:
                     (1 - EMOTION_SMOOTHING) * self.emotion_avg + EMOTION_SMOOTHING * probs)
                 i = int(self.emotion_avg.argmax())
                 self.last_emotion = (self.emotion.labels[i], float(self.emotion_avg[i]))
-        return Signals(True, ear, rel_yaw, rel_pitch, roll, *self.last_emotion, eyes_closed=closed)
+        return Signals(True, ear, rel_yaw, rel_pitch, rel_roll, *self.last_emotion, eyes_closed=closed,
+                       mouth_open=mouth)
 
     def _apply_fusion(self, sig, now):
         result = self.fusion.update(sig, now)
@@ -436,6 +441,9 @@ class Pipeline:
             lines.append(f"yaw {sig.yaw:.0f} pitch {sig.pitch:.0f}")
         if sig.emotion:
             lines.append(f"{sig.emotion} {sig.emotion_conf:.2f}")
+        m = self.fusion.metrics
+        lines.append("PERCLOS " + ("--" if m["perclos"] is None else f"{100 * m['perclos']:.0f}%")
+                     + f"  yawns {m['yawns']}" + ("" if sig.mouth_open is None else f"  mouth {sig.mouth_open:.2f}"))
         lines.append(f"driver: {self.driver['name'] if self.driver else ('?' if not self.verified else 'unknown')}")
         for i, text in enumerate(lines):
             cv2.putText(frame, text, (10, 25 + 24 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
@@ -508,8 +516,8 @@ class Pipeline:
         t["infer"] += dt
         elapsed = time.monotonic() - t["t0"]
         if elapsed >= 10:
-            log.info("perf: camera %.1f fps, processed %.1f fps, %.0f ms/frame",
-                     self.camera.fps, t["frames"] / elapsed, 1000 * t["infer"] / t["frames"])
+            log.info("perf: camera %.1f fps, processed %.1f fps, %.0f ms/frame; fatigue %s",
+                     self.camera.fps, t["frames"] / elapsed, 1000 * t["infer"] / t["frames"], self.fusion.metrics)
             self.timing = {"frames": 0, "infer": 0.0, "t0": time.monotonic()}
 
     def close(self):

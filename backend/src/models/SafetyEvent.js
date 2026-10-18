@@ -29,6 +29,11 @@ const signalsSchema = new mongoose.Schema(
     pitch: Number,
     roll: Number,
     sustainedMs: Number, // how long the condition held before triggering
+    mouthOpen: Number, // jawOpen blendshape (or mouth aspect ratio)
+    perclos: { type: Number, min: 0, max: 1 }, // share of the last minute with eyes closed
+    blinkRate: Number, // blinks per minute
+    blinkMs: Number, // mean duration of recent blinks
+    yawns: Number, // in the last five minutes
   },
   { _id: false }
 );

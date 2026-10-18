@@ -5,8 +5,11 @@
 const ROLES = ['owner', 'family', 'guest', 'admin', 'fleet_manager'];
 
 const EVENT_TYPES = [
-  'drowsiness', // FR1.2
-  'inattention', // FR1.4 head pose deviation
+  'drowsiness', // FR1.2 (eyes closed, or a head nod with closed eyes)
+  'yawning', // FR1.2 refinement: advisory, one per yawn
+  'fatigue', // PERCLOS, frequent yawns or slow blinks over minutes
+  'inattention', // FR1.4 head pose deviation (yaw, looking up, roll)
+  'looking_down', // sustained downward pitch: phone or lap
   'emotional_distress', // FR1.3 angry / fear sustained
   'unverified_driver', // face embedding did not match a known driver
   'unauthorized_occupant', // FR4.1
@@ -30,7 +33,8 @@ const LIMITS = {
   maxEmergencyContacts: 5, // FR6.4
   earThreshold: { min: 0.2, max: 0.3, default: 0.25 }, // FR1.2
   ackWindowSec: { min: 5, max: 30, default: 15 }, // FR3.2
-  headPoseDeg: { min: 15, max: 45, default: 30 }, // FR1.4
+  headPoseDeg: { min: 20, max: 45, default: 30 }, // FR1.4 / FR5.4: left / right
+  headPitchDeg: { min: 20, max: 45, default: 20 }, // up / down (looking down is the bigger risk)
   sustainSec: { min: 1, max: 10 },
   alertSensitivity: { min: 1, max: 5, default: 3 },
 };
