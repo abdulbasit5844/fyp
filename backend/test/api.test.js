@@ -289,6 +289,9 @@ test('unknown driver: photo to the app, then WhatsApp with the photo to the owne
   r = await api('GET', '/api/devices', { token });
   assert.equal(r.body[0].identity, 'unknown');
   assert.equal(r.body[0].monitoring, false);
+  assert.equal(r.body[0].driverPresent, true, 'present unless the unit says otherwise');
+  await edge('pi-test', 'status', { online: true, state: 'safe', driverPresent: false });
+  assert.equal((await api('GET', '/api/devices', { token })).body[0].driverPresent, false);
 
   const photo = Buffer.from('fake-jpeg').toString('base64');
   await edge('pi-test', 'event', {

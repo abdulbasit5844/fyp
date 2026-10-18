@@ -114,27 +114,33 @@ class _StatusCardState extends State<_StatusCard> {
     final device = live.device;
     final stopped = device != null && !device.detectionEnabled;
     final state = live.state;
-    final unknown = !stopped && device != null && device.online && device.unknownDriver;
+    final active = !stopped && device != null && device.online;
+    final noDriver = active && !device.driverPresent;
+    final unknown = active && !noDriver && device.unknownDriver;
 
-    final color = stopped ? Colors.blueGrey : (unknown ? criticalColor : stateColor(state));
+    final color = stopped || noDriver ? Colors.blueGrey : (unknown ? criticalColor : stateColor(state));
     final label = stopped
         ? 'STOPPED'
-        : unknown
-            ? 'UNKNOWN DRIVER'
-        : switch (state) {
-            DriverState.safe => 'SAFE',
-            DriverState.warning => 'WARNING',
-            DriverState.critical => 'CRITICAL',
-          };
+        : noDriver
+            ? 'NO DRIVER'
+            : unknown
+                ? 'UNKNOWN DRIVER'
+                : switch (state) {
+                    DriverState.safe => 'SAFE',
+                    DriverState.warning => 'WARNING',
+                    DriverState.critical => 'CRITICAL',
+                  };
     final icon = stopped
         ? Icons.pause_circle_outline
-        : unknown
-            ? Icons.person_off
-        : switch (state) {
-            DriverState.safe => Icons.verified_user,
-            DriverState.warning => Icons.warning_amber_rounded,
-            DriverState.critical => Icons.crisis_alert,
-          };
+        : noDriver
+            ? Icons.event_seat
+            : unknown
+                ? Icons.person_off
+                : switch (state) {
+                    DriverState.safe => Icons.verified_user,
+                    DriverState.warning => Icons.warning_amber_rounded,
+                    DriverState.critical => Icons.crisis_alert,
+                  };
 
     String subtitle;
     if (device == null) {
@@ -144,6 +150,8 @@ class _StatusCardState extends State<_StatusCard> {
       subtitle = '${device.name} is offline (last seen $seen)';
     } else if (stopped) {
       subtitle = 'Driver detection is off. Press Start detecting when the driver is ready.';
+    } else if (noDriver) {
+      subtitle = "No driver in the camera. Sit in the driver's seat facing the camera.";
     } else if (unknown) {
       subtitle = "Someone who is not a registered driver is in the driver's seat of ${device.name}. "
           'Monitoring is paused until a registered driver is recognised.';
@@ -164,7 +172,10 @@ class _StatusCardState extends State<_StatusCard> {
             Icon(icon, size: 72, color: readable(context, color)),
             const SizedBox(height: 8),
             Text(label,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(color: readable(context, color), fontWeight: FontWeight.bold)),
+                style: Theme.of(context)
+                    .textTheme
+                    .displaySmall
+                    ?.copyWith(color: readable(context, color), fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(subtitle, textAlign: TextAlign.center),
             if (unknown) ...[
@@ -184,14 +195,18 @@ class _StatusCardState extends State<_StatusCard> {
                     ? FilledButton.icon(
                         onPressed: _busy || !device.online ? null : () => _toggle(true),
                         style: FilledButton.styleFrom(
-                            backgroundColor: safeColor, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 18)),
+                            backgroundColor: safeColor,
+                            foregroundColor: Colors.white,
+                            textStyle: const TextStyle(fontSize: 18)),
                         icon: _busy ? _spinner() : const Icon(Icons.play_arrow),
                         label: const Text('Start detecting'),
                       )
                     : FilledButton.icon(
                         onPressed: _busy ? null : () => _toggle(false),
                         style: FilledButton.styleFrom(
-                            backgroundColor: criticalColor, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 18)),
+                            backgroundColor: criticalColor,
+                            foregroundColor: Colors.white,
+                            textStyle: const TextStyle(fontSize: 18)),
                         icon: _busy ? _spinner() : const Icon(Icons.stop),
                         label: const Text('Stop detecting'),
                       ),
@@ -241,9 +256,7 @@ class _LastEventCard extends StatelessWidget {
         leading: Icon(e == null ? Icons.event_available : eventIcon(e.type),
             color: e == null ? null : severityColor(e.severity)),
         title: Text(e == null ? 'No safety events yet' : 'Last event: ${e.title}'),
-        subtitle: e == null
-            ? null
-            : Text('${DateFormat('d MMM, HH:mm:ss').format(e.detectedAt)} • ${e.actionTaken}'),
+        subtitle: e == null ? null : Text('${DateFormat('d MMM, HH:mm:ss').format(e.detectedAt)} • ${e.actionTaken}'),
       ),
     );
   }

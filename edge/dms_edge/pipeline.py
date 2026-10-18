@@ -33,6 +33,7 @@ UNKNOWN_AFTER = 6  # clear looks in a row that match no authorized driver → un
 UNSURE_SCORE = 0.30  # just under the match threshold: not a match, but not clearly a stranger either
 VERIFY_GAP = 3.0  # face out of view this long while verifying → start counting afresh
 REVERIFY_AFTER = 30.0  # face absent this long → possible driver change
+NO_DRIVER_AFTER = 2.0  # no face for this long → the app shows "No driver in the camera"
 LIVE_KEEPALIVE = 45.0  # seconds without a request from the app before the stream stops
 ENROLL_SAMPLES = 5
 ENROLL_SPACING = 0.15  # seconds between enrollment samples
@@ -122,6 +123,7 @@ class Pipeline:
         self.unknown_event: str | None = None  # open unverified_driver event
         self._reset_identity()
         self.face_last_seen = 0.0
+        self.driver_present = False  # a face in view within the last NO_DRIVER_AFTER seconds
         # Enrollment request in progress
         self.enroll: dict | None = None
         # Open events per condition, to resolve warnings when they clear
@@ -455,6 +457,14 @@ class Pipeline:
                 self._resolve_event(eid)
         self.state = result.state
 
+    def _track_presence(self, now):
+        """Tell the app at once when the seat empties or someone sits down."""
+        present = now - self.face_last_seen < NO_DRIVER_AFTER
+        if present != self.driver_present:
+            self.driver_present = present
+            log.info("driver %s the camera", "in" if present else "not in")
+            self._publish_status(now, force=True)
+
     def _publish_status(self, now, force=False):
         if not force and now - self.last_status < 2.0:
             return
@@ -467,6 +477,7 @@ class Pipeline:
             "liveQuality": self.camera.live_quality,
             "monitoring": self.detecting and self.verified,
             "identity": self.identity,
+            "driverPresent": self.driver_present,
             "driverId": self.driver["id"] if self.driver else None,
             "location": self.gps.position,
             "pipelineVersion": __version__,
@@ -527,6 +538,8 @@ class Pipeline:
                     self._reset_identity()
                     self.fusion.reset()
                     self._reset_driver_model()
+                if self.detecting:
+                    self._track_presence(now)
 
                 if self.enroll:
                     self._handle_enrollment(frame, face)

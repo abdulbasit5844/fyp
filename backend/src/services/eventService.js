@@ -27,6 +27,7 @@ async function updateDeviceStatus(device, s) {
   }
   if (typeof s.monitoring === 'boolean') device.monitoring = s.monitoring;
   if (['verifying', 'verified', 'unknown', 'none'].includes(s.identity)) device.identity = s.identity;
+  if (typeof s.driverPresent === 'boolean') device.driverPresent = s.driverPresent;
   if (s.driverId !== undefined) {
     device.activeDriver = s.driverId && (await DriverProfile.exists({ _id: s.driverId, owner: device.owner }))
       ? s.driverId

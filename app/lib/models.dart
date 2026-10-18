@@ -29,7 +29,8 @@ class Device {
         lastSeenAt = _date(j['lastSeenAt']),
         stateUpdatedAt = _date(j['stateUpdatedAt']),
         activeDriverName = (j['activeDriver'] is Map) ? j['activeDriver']['displayName'] : null,
-        identity = j['identity'] ?? 'verifying';
+        identity = j['identity'] ?? 'verifying',
+        driverPresent = j['driverPresent'] ?? true;
 
   final String id, deviceId, name;
   final bool online, monitoring;
@@ -40,6 +41,8 @@ class Device {
   /// verifying | verified | unknown | none (nobody enrolled: whoever drives is monitored)
   final String identity;
   bool get unknownDriver => identity == 'unknown';
+  /// false: nobody in the camera (no face for 2 s)
+  final bool driverPresent;
 }
 
 class SafetyEvent {

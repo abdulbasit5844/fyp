@@ -21,6 +21,7 @@ const deviceSchema = new mongoose.Schema(
     // Who is in the driver's seat: still checking, a recognised driver, someone unknown,
     // or none (nobody enrolled, so whoever drives is monitored).
     identity: { type: String, enum: ['verifying', 'verified', 'unknown', 'none'], default: 'verifying' },
+    driverPresent: { type: Boolean, default: true }, // false: nobody in the camera
     // Start/Stop detecting from the app. Off: the unit runs no detection and raises no alerts.
     detectionEnabled: { type: Boolean, default: false },
 

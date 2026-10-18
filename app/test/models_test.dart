@@ -53,6 +53,8 @@ void main() {
     expect(d.unknownDriver, isFalse);
     expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1', 'identity': 'unknown'}).unknownDriver, isTrue);
     expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1'}).identity, 'verifying');
+    expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1'}).driverPresent, isTrue);
+    expect(Device.fromJson({'id': 'd1', 'deviceId': 'pi-1', 'driverPresent': false}).driverPresent, isFalse);
   });
 
   test('Unknown-driver event carries the photo', () {

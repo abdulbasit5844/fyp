@@ -49,7 +49,7 @@ def make_pipeline(authorized=True, enrolled=True):
     p.recorder = SimpleNamespace(trigger=lambda eid: None)
     p.gps = SimpleNamespace(position=None)
     p.camera = SimpleNamespace(live=False, live_quality=None, fps=10.0, connected=True)
-    p.unknown_event = None
+    p.unknown_event, p.driver_present = None, True
     p._reset_identity()
     return p
 
@@ -146,3 +146,16 @@ def test_stopping_detection_closes_the_unknown_person_alert():
     p._on_detection({"enabled": False})
     assert events(p, "event/resolve")[-1]["eventId"] == e["eventId"]
     assert p.identity == "verifying" and p.unknown_event is None
+
+
+def test_app_is_told_when_nobody_is_in_the_camera():
+    p = make_pipeline()
+    p.face_last_seen, p.driver_present = 10.0, True
+    p._track_presence(11.0)
+    assert p.mqtt.sent == []  # face gone for 1 s: still counts as present
+    p._track_presence(10.0 + pl.NO_DRIVER_AFTER + 0.1)
+    assert events(p, "status")[-1]["driverPresent"] is False
+    p.face_last_seen = 13.0
+    p._track_presence(13.0)
+    assert events(p, "status")[-1]["driverPresent"] is True
+    assert len(events(p, "status")) == 2  # only on changes

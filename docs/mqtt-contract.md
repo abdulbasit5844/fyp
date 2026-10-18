@@ -7,7 +7,7 @@ Broker: Mosquitto on the Pi, `127.0.0.1:1883`, localhost only. Every payload is 
 
 | Topic | QoS / retain | Payload |
 |---|---|---|
-| `dms/{id}/status` | 1, retained; also the Last Will with `{"online": false}` | `{online, state: "safe"\|"warning"\|"critical", monitoring, identity: "verifying"\|"verified"\|"unknown"\|"none", driverId?, location?: {lat, lng, accuracyM}, pipelineVersion, ts}` |
+| `dms/{id}/status` | 1, retained; also the Last Will with `{"online": false}` | `{online, state: "safe"\|"warning"\|"critical", monitoring, identity: "verifying"\|"verified"\|"unknown"\|"none", driverPresent (false = no face in the camera for 2 s), driverId?, location?: {lat, lng, accuracyM}, pipelineVersion, ts}` |
 | `dms/{id}/event` | 1 | `{eventId, type, severity: "warning"\|"critical", detectedAt, description?, driverId?, signals?: {ear, emotion, emotionConfidence, yaw, pitch, roll, sustainedMs, mouthOpen, perclos, blinkRate, blinkMs, yawns}, location?}` |
 | `dms/{id}/event/ack` | 1 | `{eventId, ts}`: driver pressed the physical button |
 | `dms/{id}/event/escalate` | 1 | `{eventId, location?: {lat, lng, accuracyM, capturedAt}, ts}`: acknowledgment window expired |
