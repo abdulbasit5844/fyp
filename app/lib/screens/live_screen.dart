@@ -101,7 +101,7 @@ class _LiveScreenState extends State<LiveScreen> {
           ('rtsp-transport', 'tcp'),
           ('demuxer-lavf-o', 'fflags=+nobuffer'),
         ]) {
-          await native.setProperty(k, v);
+          await (native as dynamic).setProperty(k, v); // dynamic: the web stub of NativePlayer lacks it
         }
       }
       // The unit needs ~1 s to restart its camera in live mode; retry until the stream appears.
@@ -129,8 +129,8 @@ class _LiveScreenState extends State<LiveScreen> {
     try {
       // Measured rate when mpv reports it; in low-latency (untimed) mode it often
       // does not, so fall back to the stream's own frame rate.
-      final v = double.tryParse(await native.getProperty('estimated-vf-fps')) ??
-          double.tryParse(await native.getProperty('container-fps'));
+      final v = double.tryParse(await (native as dynamic).getProperty('estimated-vf-fps')) ??
+          double.tryParse(await (native as dynamic).getProperty('container-fps'));
       if (mounted) setState(() => _fps = v);
     } catch (_) {}
   }

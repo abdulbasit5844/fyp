@@ -18,7 +18,12 @@ class AuthState extends ChangeNotifier {
 
   /// Restores the previous session on app start.
   Future<void> init() async {
-    await tokens.load();
+    try {
+      await tokens.load();
+    } catch (e) {
+      // Never leave the app on the loading screen; fall back to sign-in.
+      debugPrint('Could not restore the session: $e');
+    }
     if (tokens.refreshToken != null) {
       try {
         user = User.fromJson(await api.get('/auth/me'));
