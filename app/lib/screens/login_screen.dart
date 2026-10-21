@@ -75,11 +75,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _server,
                     decoration: const InputDecoration(
                       labelText: 'Vehicle unit address',
-                      helperText: 'e.g. http://pi.local:3000',
+                      helperText: 'e.g. http://10.86.235.249:3000',
                       prefixIcon: Icon(Icons.router),
                     ),
                     keyboardType: TextInputType.url,
-                    validator: (v) => Uri.tryParse(v ?? '')?.hasScheme == true ? null : 'Enter a URL like http://pi.local:3000',
+                    validator: (v) => Uri.tryParse(v ?? '')?.hasScheme == true ? null : 'Enter a URL like http://10.86.235.249:3000',
                   ),
                   const SizedBox(height: 12),
                   if (_register) ...[

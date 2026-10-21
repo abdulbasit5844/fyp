@@ -12,7 +12,7 @@ class TokenStore {
 
   String? accessToken;
   String? refreshToken;
-  String serverUrl = 'http://pi.local:3000';
+  String serverUrl = 'http://10.86.235.249:3000';
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
